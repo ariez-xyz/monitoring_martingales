@@ -1,0 +1,13 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Egg info
+*.egg-info/
+
+# OS files
+.DS_Store
+
+# Temp
+tmp/
