@@ -106,6 +106,21 @@ class DynamicalSystemAdapter(ABC):
         """
         pass
 
+    def get_lipschitz_constant(self) -> float:
+        """
+        Returns the Lipschitz constant γ for the expected reward function.
+
+        The Lipschitz assumption is: |E[R(x)] - E[R(x')]| ≤ γ · d(x, x')
+
+        This is used by HistoryEstimator to compute discretization error.
+        The constant depends on the (CBF, controller, dynamics) triple and
+        should be estimated empirically or computed from network weights.
+
+        Raises:
+            NotImplementedError: If Lipschitz constant is not available.
+        """
+        raise NotImplementedError("Lipschitz constant not available for this adapter")
+
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Computes E[Y] where Y ~ P(x) is the next state analytically.

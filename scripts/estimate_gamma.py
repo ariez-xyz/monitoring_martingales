@@ -5,38 +5,50 @@ The Lipschitz assumption is: |E[ρ(x)] - E[ρ(x')]| ≤ γ · d(x, x')
 
 Follows sablas test_drone.py approach: run for a large fixed number of steps,
 collecting diverse states across many episode resets.
+
+Uses AnalyticEstimator for exact E[R] computation (exploiting small Jensen gap).
 """
 
 import numpy as np
 import torch
 from monitor.adapters import SablasDrone
+from monitor.estimators import AnalyticEstimator
 
 EVAL_STEPS = 50000  # Fewer than CBF bounds since we need pairwise comparisons
 
 
-def estimate_expected_reward(adapter: SablasDrone, state: torch.Tensor, obstacle: np.ndarray, n_samples: int = 100) -> float:
-    """Estimate E[R(x)] by sampling next states."""
+def compute_expected_reward(adapter: SablasDrone, state: torch.Tensor, obstacle: np.ndarray, noise: np.ndarray) -> float:
+    """Compute E[R(x)] analytically by temporarily setting adapter state."""
+    # Save current state
     original_state = adapter.state.copy()
     original_obstacle = adapter.obstacle.copy()
+    original_noise = adapter.env.noise.copy()
 
+    # Set to the historical state
     adapter.state = state.numpy()
     adapter.obstacle = obstacle
+    adapter.env.noise = noise
 
-    next_states = adapter.sample(state, n_samples=n_samples)
-    rewards = adapter.get_reward(next_states, cur_state=state)
+    # Use analytic estimator (exploits small Jensen gap)
+    estimator = AnalyticEstimator()
+    _, reward, _, _ = estimator(adapter)
 
+    # Restore state
     adapter.state = original_state
     adapter.obstacle = original_obstacle
-    return float(rewards.mean())
+    adapter.env.noise = original_noise
+
+    return reward
 
 
 def main():
     adapter = SablasDrone()
 
-    # Collect states and obstacles from long run
+    # Collect states, obstacles, and noise from long run
     print(f"Collecting states over {EVAL_STEPS} steps...")
     states = []
     obstacles = []
+    noises = []
     num_resets = 0
 
     for i in range(EVAL_STEPS):
@@ -46,6 +58,7 @@ def main():
 
         states.append(torch.from_numpy(adapter.state.copy()).float())
         obstacles.append(adapter.obstacle.copy())
+        noises.append(adapter.env.noise.copy())
         adapter.step()
 
         if (i + 1) % 10000 == 0:
@@ -53,39 +66,29 @@ def main():
 
     print(f"Collected {len(states)} states across {num_resets} resets")
 
-    # Sample pairs and compute ratios
-    print("Estimating expected rewards and computing ratios...")
-    n_pairs = 1000
+    # Compute E[R] for all states
+    print("Computing E[R] for all states...")
+    expected_rewards = []
+    for i in range(len(states)):
+        er = compute_expected_reward(adapter, states[i], obstacles[i], noises[i])
+        expected_rewards.append(er)
+        if (i + 1) % 10000 == 0:
+            print(f"  Progress: {i + 1}/{len(states)}")
+
+    # Compute ratios for temporally close pairs
+    print("Computing Lipschitz ratios for temporally close pairs...")
+    max_temporal_gap = 50  # Only consider pairs within 50 steps of each other
     ratios = []
 
-    rng = np.random.default_rng(42)
-    indices = rng.choice(len(states), size=(n_pairs, 2), replace=True)
+    for i in range(len(states)):
+        for j in range(i + 1, min(i + max_temporal_gap + 1, len(states))):
+            dist = adapter.distance(states[i], states[j])
+            if dist > 1e-6:  # avoid division by zero
+                ratio = abs(expected_rewards[i] - expected_rewards[j]) / dist
+                ratios.append(ratio)
 
-    # Cache expected rewards
-    reward_cache = {}
-
-    for i, (idx1, idx2) in enumerate(indices):
-        if idx1 == idx2:
-            continue
-
-        state1, state2 = states[idx1], states[idx2]
-        obs1, obs2 = obstacles[idx1], obstacles[idx2]
-
-        # Get or compute expected rewards
-        if idx1 not in reward_cache:
-            reward_cache[idx1] = estimate_expected_reward(adapter, state1, obs1)
-        if idx2 not in reward_cache:
-            reward_cache[idx2] = estimate_expected_reward(adapter, state2, obs2)
-
-        er1, er2 = reward_cache[idx1], reward_cache[idx2]
-        dist = adapter.distance(state1, state2)
-
-        if dist > 1e-6:  # avoid division by zero
-            ratio = abs(er1 - er2) / dist
-            ratios.append(ratio)
-
-        if (i + 1) % 200 == 0:
-            print(f"  Processed {i + 1}/{n_pairs} pairs")
+        if (i + 1) % 10000 == 0:
+            print(f"  Progress: {i + 1}/{len(states)}")
 
     ratios = np.array(ratios)
 

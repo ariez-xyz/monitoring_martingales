@@ -33,8 +33,14 @@ class SablasDrone(DynamicalSystemAdapter):
         # Certificate bounds - the sablas CBF network is unbounded (Tanh defined but not
         # applied in forward pass, see sablas/modules/network.py:21,43).
         # Empirically estimated via scripts/estimate_cbf_bounds.py over 1M steps (4549 resets):
-        # observed [-1.80, 0.66], using 0.2 margin. Values outside are clamped.
+        # observed [-1.80, 0.66], using 0.2 margin. 
+        # Values outside are clamped in get_certificate_value.
         self.certificate_bounds: Tuple[float, float] = (-2.0, 0.86)
+
+        # Lipschitz constant for expected reward function.
+        # Empirically estimated via scripts/estimate_gamma.py over 50k steps.
+        # 99th percentile ~0.43, max ~7. Using 1.0 as a balanced default.
+        self.lipschitz_constant: float = 1.0
 
         estimated_param = None
         if use_estimated_param:
@@ -204,6 +210,10 @@ class SablasDrone(DynamicalSystemAdapter):
     def distance(self, state1: torch.Tensor, state2: torch.Tensor) -> float:
         """Euclidean distance on full state."""
         return float(torch.linalg.norm(state1 - state2))
+
+    def get_lipschitz_constant(self) -> float:
+        """Returns the Lipschitz constant for expected rewards."""
+        return self.lipschitz_constant
 
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """

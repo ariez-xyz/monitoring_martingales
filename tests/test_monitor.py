@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from monitor import NeuralCertificateMonitor
 from monitor.adapters import SablasDrone
-from monitor.monitor import SamplingEstimator, AnalyticEstimator
+from monitor.estimators import SamplingEstimator, AnalyticEstimator
 
 
 def test_base():
