@@ -13,20 +13,6 @@ class Estimator(ABC):
         pass
 
 
-class NeuralCertificateMonitor:
-    def __init__(self, adapter: DynamicalSystemAdapter, estimator: Estimator):
-        self.adapter = adapter
-        self.estimator = estimator
-
-    def run(self):
-        try:
-            while not self.adapter.done():
-                print(self.estimator(self.adapter))
-                self.adapter.step()
-        except KeyboardInterrupt:
-            pass
-
-
 class HistoryEstimator(Estimator):
     def __init__(self):
         pass
@@ -91,4 +77,18 @@ class AnalyticEstimator(Estimator):
         lower, upper = reward, reward
         safety = "T" if reward < 0 else "F" if reward > 0 else "?"
         return safety, lower, upper, None
+
+
+class NeuralCertificateMonitor:
+    def __init__(self, adapter: DynamicalSystemAdapter, estimator: Estimator):
+        self.adapter = adapter
+        self.estimator = estimator
+
+    def run(self):
+        try:
+            while not self.adapter.done():
+                print(self.estimator(self.adapter))
+                self.adapter.step()
+        except KeyboardInterrupt:
+            pass
 
