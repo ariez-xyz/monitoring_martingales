@@ -1,5 +1,6 @@
-from typing import Any, Literal, Tuple
+from typing import Any, List, Literal, Optional, Tuple
 from .adapters import DynamicalSystemAdapter
+from .weighting import WeightingStrategy, RecentWeights
 from math import log, sqrt, pi
 from abc import ABC, abstractmethod
 import torch
@@ -35,14 +36,71 @@ class HistoryEstimator(Estimator):
 
     Uses the Lipschitz assumption to bound discretization error and
     concentration inequalities for the statistical error.
+
+    The CI is: weighted_mean ± (DE + SE) where:
+    - DE = γ * Σ w_i * d(x_t, x_i)  (discretization error)
+    - SE = sqrt(3.3 * V_t * (2*log(log(max(1, V_t))) + log(2/δ)))  (statistical error)
+    - V_t = Σ (w_i * σ)²  (weighted variance, with σ = (b-a)/2)
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, weighting: Optional[WeightingStrategy] = None, delta: float = 0.01):
+        self.weighting = weighting or RecentWeights(k=10)
+        self.delta = delta
 
     def __call__(self, adapter):
-        # TODO: Implement history-based estimation
-        raise NotImplementedError("HistoryEstimator not yet implemented")
+        history = adapter.state_history
+        t = len(history) - 1
+
+        # Need at least one prior state to have a reward
+        if t < 1:
+            return "?", float('-inf'), float('inf'), {"t": t, "reason": "insufficient history"}
+
+        # Compute observed rewards R_i for each transition i -> i+1
+        get_reward_at = lambda i: float(adapter.get_reward(history[i+1].unsqueeze(0), cur_state=history[i]))
+        rewards = [get_reward_at(i) for i in range(t)]
+
+        # Get weights for current timestep
+        # We have t rewards (for transitions 0->1, ..., (t-1)->t)
+        weights = self.weighting(adapter, t - 1)  # t weights for t rewards
+
+        # Weighted mean of observed rewards
+        weighted_mean = sum(w * r for w, r in zip(weights, rewards))
+
+        # Discretization error: DE = γ * Σ w_i * d(x_t, x_i)
+        gamma = adapter.get_lipschitz_constant()
+        current_state = history[t]
+        DE = 0.0
+        for i, w in enumerate(weights):
+            dist = adapter.distance(current_state, history[i])
+            DE += w * dist
+        DE *= gamma
+
+        # Statistical error
+        reward_bounds = adapter.get_reward_bounds()
+        sigma = (reward_bounds[1] - reward_bounds[0]) / 2  # sub-Gaussian norm from bounded rewards
+
+        # V_t = Σ (w_i * σ)²
+        V_t = sum((w * sigma) ** 2 for w in weights)
+
+        # SE = sqrt(3.3 * V_t * (2*log(log(max(1, V_t))) + log(2/δ)))
+        # TODO: The formula has issues when V_t is small:
+        #   - log(1) = 0, so log(log(1)) is undefined (log(0))
+        #   - For small inner_log, 2*log(inner_log) can be negative enough to make
+        #     the entire sqrt argument negative (depends on delta)
+        #   Using max(e, V_t) ensures inner_log >= 1, so log(inner_log) >= 0, avoiding both issues.
+        #   This is conservative but may not match the theoretical formula exactly.
+        if V_t > 0:
+            inner_log = log(max(2.718281828, V_t))  # >= 1
+            SE = sqrt(3.3 * V_t * (2 * log(inner_log) + log(2 / self.delta)))
+        else:
+            SE = 0.0
+
+        # Final CI
+        lower = weighted_mean - DE - SE
+        upper = weighted_mean + DE + SE
+
+        safety = "T" if upper < 0 else "F" if lower > 0 else "?"
+        return safety, lower, upper, {"t": t, "DE": DE, "SE": SE, "V_t": V_t}
 
 
 class SamplingEstimator(Estimator):
