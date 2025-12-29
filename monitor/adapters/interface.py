@@ -108,13 +108,17 @@ class DynamicalSystemAdapter(ABC):
 
     def get_lipschitz_constant(self) -> float:
         """
-        Returns the Lipschitz constant γ for the expected reward function.
+        Returns the temporal Lipschitz constant γ for expected rewards.
 
-        The Lipschitz assumption is: |E[R(x)] - E[R(x')]| ≤ γ · d(x, x')
+        For temporal weighting, γ represents reward change per timestep:
+            γ = |ΔR| / k  where k is the number of timesteps
 
-        This is used by HistoryEstimator to compute discretization error.
-        The constant depends on the (CBF, controller, dynamics) triple and
-        should be estimated empirically or computed from network weights.
+        This scales with dt: smaller timesteps → smaller γ → larger optimal m*.
+        Used by OptimalTemporalWeights for: m* = (c1/γ)^(2/3)
+
+        Implementations may either:
+        - Return a pre-computed constant (if dt is fixed, e.g. trained controllers)
+        - Estimate dynamically and cache by dt (if dt is configurable)
 
         Raises:
             NotImplementedError: If Lipschitz constant is not available.

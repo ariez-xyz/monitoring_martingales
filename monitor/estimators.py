@@ -1,6 +1,6 @@
-from typing import Any, List, Literal, Optional, Tuple
+from typing import Any, List, Literal, Optional, Tuple, Union
 from .adapters import DynamicalSystemAdapter
-from .weighting import WeightingStrategy, RecentWeights
+from .weighting import WeightingStrategy, RecentWeights, OptimalTemporalWeights
 from math import log, sqrt, pi
 from abc import ABC, abstractmethod
 import torch
@@ -38,69 +38,97 @@ class HistoryEstimator(Estimator):
     concentration inequalities for the statistical error.
 
     The CI is: weighted_mean ± (DE + SE) where:
-    - DE = γ * Σ w_i * d(x_t, x_i)  (discretization error)
+    - DE = γ * Σ w_i * d(x_target, x_i)  (discretization error)
     - SE = sqrt(3.3 * V_t * (2*log(log(max(1, V_t))) + log(2/δ)))  (statistical error)
     - V_t = Σ (w_i * σ)²  (weighted variance, with σ = (b-a)/2)
+
+    Delayed Estimation:
+    When delay > 0, estimates E[R] at target = T - delay instead of T.
+    This allows weighting strategies like OptimalTemporalWeights to use
+    symmetric lookahead (indices both before and after target).
     """
 
-    def __init__(self, weighting: Optional[WeightingStrategy] = None, delta: float = 0.01):
+    def __init__(
+        self,
+        weighting: Optional[WeightingStrategy] = None,
+        delta: float = 0.01,
+        delay: Union[int, Literal["auto"]] = 0,
+    ):
+        """
+        Args:
+            weighting: Weighting strategy for combining historical rewards.
+            delta: Confidence level for the CI (default 0.01 for 99% confidence).
+            delay: Number of steps to delay estimation. Options:
+                   - 0: Estimate at latest timestep T (default, no lookahead)
+                   - int > 0: Estimate at T - delay (fixed delay)
+                   - "auto": Compute delay from OptimalTemporalWeights.get_optimal_m()
+        """
         self.weighting = weighting or RecentWeights(k=10)
         self.delta = delta
+        self.delay = delay
+
+    def _get_delay(self, adapter: DynamicalSystemAdapter) -> int:
+        """Compute the actual delay value (number of neighbors in one direction)."""
+        if self.delay == "auto":
+            if isinstance(self.weighting, OptimalTemporalWeights):
+                return self.weighting.get_optimal_m(adapter) // 2
+            else:
+                # For non-optimal weighting, auto delay doesn't make sense
+                return 0
+        return int(self.delay)
 
     def __call__(self, adapter):
         history = adapter.state_history
-        t = len(history) - 1
+        T = len(history) - 1 # index of last step
+        delay = self._get_delay(adapter)
+        target = T - delay
 
-        # Need at least one prior state to have a reward
-        if t < 1:
-            return "?", float('-inf'), float('inf'), {"t": t, "reason": "insufficient history"}
+        # Need at least one prior state to have a reward, and target must be valid
+        if T < 1 or target < delay: # TODO: delay?
+            info = { "T": T, "target": target, "delay": delay, "reason": "insufficient history" }
+            return "?", float('-inf'), float('inf'), info
 
         # Compute observed rewards R_i for each transition i -> i+1
-        get_reward_at = lambda i: float(adapter.get_reward(history[i+1].unsqueeze(0), cur_state=history[i]))
-        rewards = [get_reward_at(i) for i in range(t)]
+        get_reward_at = lambda i: adapter.get_reward(
+            next_state=history[i+1],
+            cur_state=history[i]
+        )
+        rewards = [float(get_reward_at(i)) for i in range(T)]
 
-        # Get weights for current timestep
-        # We have t rewards (for transitions 0->1, ..., (t-1)->t)
-        weights = self.weighting(adapter, t - 1)  # t weights for t rewards
+        # Get weights centered around target (allows lookahead when target < T)
+        weights = self.weighting(adapter, target - 1)  # -1 because reward indices are 0 to T-1
+        print(T, target, delay, weights)
 
         # Weighted mean of observed rewards
         weighted_mean = sum(w * r for w, r in zip(weights, rewards))
 
-        # Discretization error: DE = γ * Σ w_i * d(x_t, x_i)
+        # Discretization error: DE = γ * Σ w_i * d(x_target, x_i)
+        # Note: we use the TARGET state, not the latest state
         gamma = adapter.get_lipschitz_constant()
-        current_state = history[t]
-        DE = 0.0
-        for i, w in enumerate(weights):
-            dist = adapter.distance(current_state, history[i])
-            DE += w * dist
-        DE *= gamma
+
+        dist = lambda i, j: abs(i-j)
+        # To do spatial distance instead: something like
+        # dist = lambda i,j: adapter.distance(history[i], history[j])
+
+        DE = sum(w * gamma * dist(target, i) for i, w in enumerate(weights))
 
         # Statistical error
-        reward_bounds = adapter.get_reward_bounds()
+        reward_bounds = adapter.get_reward_bounds() # TODO too loose (as in the city in southern france)
         sigma = (reward_bounds[1] - reward_bounds[0]) / 2  # sub-Gaussian norm from bounded rewards
 
         # V_t = Σ (w_i * σ)²
         V_t = sum((w * sigma) ** 2 for w in weights)
-
-        # SE = sqrt(3.3 * V_t * (2*log(log(max(1, V_t))) + log(2/δ)))
-        # TODO: The formula has issues when V_t is small:
-        #   - log(1) = 0, so log(log(1)) is undefined (log(0))
-        #   - For small inner_log, 2*log(inner_log) can be negative enough to make
-        #     the entire sqrt argument negative (depends on delta)
-        #   Using max(e, V_t) ensures inner_log >= 1, so log(inner_log) >= 0, avoiding both issues.
-        #   This is conservative but may not match the theoretical formula exactly.
-        if V_t > 0:
-            inner_log = log(max(2.718281828, V_t))  # >= 1
-            SE = sqrt(3.3 * V_t * (2 * log(inner_log) + log(2 / self.delta)))
-        else:
-            SE = 0.0
+        num = gamma * log(2/self.delta)
+        denom = 2 * delay + 1
+        SE = sqrt(num/denom)
 
         # Final CI
         lower = weighted_mean - DE - SE
         upper = weighted_mean + DE + SE
 
         safety = "T" if upper < 0 else "F" if lower > 0 else "?"
-        return safety, lower, upper, {"t": t, "DE": DE, "SE": SE, "V_t": V_t}
+        info = { "T": T, "target": target, "delay": delay, "DE": DE, "SE": SE, "V_t": V_t }
+        return safety, lower, upper, info
 
 
 class SamplingEstimator(Estimator):

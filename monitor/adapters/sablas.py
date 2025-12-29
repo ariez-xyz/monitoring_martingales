@@ -17,6 +17,13 @@ class SablasDrone(DynamicalSystemAdapter):
         self.k_obs = k_obstacle
         self.is_done = False
 
+        if dt != 0.1:
+            import warnings
+            warnings.warn(
+                f"SablasDrone: dt={dt} differs from training dt=0.1. "
+                "Controller/CBF were trained with dt=0.1; results may be invalid."
+            )
+
         # Visualization settings
         self.vis_every = vis_every
         self.vis_block = vis_block
@@ -111,6 +118,8 @@ class SablasDrone(DynamicalSystemAdapter):
         # reward = f(cur_v) - next_v
         # reward_lo: minimize f(cur_v), maximize next_v
         # reward_hi: maximize f(cur_v), minimize next_v
+        # TODO: currently this doesn't take into account that we won't probably transition from 
+        # minimum to maximum value of f in a single step?
         reward_lo = f_min - cert_hi
         reward_hi = f_max - cert_lo
 

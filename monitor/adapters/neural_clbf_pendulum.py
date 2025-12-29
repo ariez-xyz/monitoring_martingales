@@ -25,6 +25,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self,
         checkpoint_path: str = "neural_clbf/saved_models/review/inverted_pendulum_clf.ckpt",
         dt: Optional[float] = None,
+        control_period: Optional[float] = None,
         noise_scale: float = 0.0,
         vis_every: int = 0,
         vis_block: bool = False,
@@ -33,6 +34,8 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         Args:
             checkpoint_path: Path to the pretrained checkpoint
             dt: Timestep for simulation. If None, uses the model's default (0.01)
+            control_period: How often to update control. If None, updates every step.
+                           E.g., control_period=0.05 with dt=0.01 updates every 5 steps.
             noise_scale: Noise radius = noise_scale * dt. Uniform ball distribution.
                          E.g., noise_scale=1.0 with dt=0.01 gives radius=0.01.
             vis_every: Visualize every N steps (0 to disable)
@@ -47,6 +50,13 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self.dt = dt if dt is not None else self.dynamics.dt
         self.noise_scale = noise_scale
 
+        # Control update frequency (None = every step)
+        if control_period is not None:
+            self.control_update_freq = max(1, int(round(control_period / self.dt)))
+        else:
+            self.control_update_freq = 1
+        self._cached_control: Optional[torch.Tensor] = None
+
         # Visualization settings
         self.vis_every = vis_every
         self.vis_block = vis_block
@@ -58,9 +68,10 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         # V_min ≈ 0 at origin (goal state)
         self.certificate_bounds: Tuple[float, float] = (0.0, 22.0)
 
-        # Lipschitz constant - need to estimate empirically
-        # TODO: Run estimation script
-        self.lipschitz_constant: float = 1.0
+        # Temporal Lipschitz constant γ = |ΔR|/k (reward change per timestep)
+        # Cached by dt since γ scales with timestep size
+        # Used by OptimalTemporalWeights for m* = (c1/γ)^(2/3)
+        self._lipschitz_cache: dict = {}
 
         self.reset()
 
@@ -77,6 +88,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self.control_history = []
         self.clf_history = [float(self.get_certificate_value())]
         self._step_count = 0
+        self._cached_control = None
         self.is_done = False
 
     def done(self) -> bool:
@@ -95,13 +107,14 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         return (cert_lo - cert_hi, cert_hi - cert_lo)
 
     def get_reward(self, next_state: torch.Tensor, cur_state: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Compute reward: V(x) - V(Y).
+        """Compute reward: V(Y) - V(x).
 
-        For CLF, we want V to decrease, so positive reward means CLF condition satisfied.
+        For CLF, we want V to decrease, so negative reward means CLF condition satisfied.
+        This matches the interface contract: E[reward] <= 0 indicates safety.
         """
         cur_v = self.get_certificate_value(cur_state)
         next_v = self.get_certificate_value(next_state)
-        return cur_v - next_v
+        return next_v - cur_v
 
     def get_certificate_value(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Compute V(x) using the learned CLF."""
@@ -126,8 +139,11 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             # Get control-affine dynamics
             f, g = self.dynamics.control_affine_dynamics(state_batch)
 
-            # Use nominal LQR controller (avoids QP solver issues)
-            u = self.dynamics.u_nominal(state_batch)
+            # Update control only at specified frequency (zero-order hold)
+            if self._cached_control is None or self._step_count % self.control_update_freq == 0:
+                self._cached_control = self.dynamics.u_nominal(state_batch)
+
+            u = self._cached_control
 
             # Compute state derivative: ẋ = f + g @ u
             xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
@@ -187,8 +203,79 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         return float(torch.linalg.norm(state1 - state2))
 
     def get_lipschitz_constant(self) -> float:
-        """Returns Lipschitz constant for expected rewards."""
-        return self.lipschitz_constant
+        """Returns temporal Lipschitz constant γ = |ΔR|/k for expected rewards.
+
+        Estimates γ on first call for current dt, then caches the result.
+        """
+        if self.dt not in self._lipschitz_cache:
+            self._lipschitz_cache[self.dt] = self._estimate_lipschitz_constant()
+        return self._lipschitz_cache[self.dt]
+
+    def _estimate_lipschitz_constant(
+        self, n_episodes: int = 30, max_steps: int = 20000, percentile: float = 99.999
+    ) -> float:
+        """Estimate temporal Lipschitz constant by running trajectories.
+
+        Computes γ = |ΔR|/k for adjacent timesteps (k=1) and returns the
+        specified percentile as a robust estimate.
+
+        Args:
+            n_episodes: Number of episodes to run
+            max_steps: Max steps per episode
+            percentile: Percentile of |ΔR| values to return (default 99th)
+
+        Returns:
+            Estimated temporal γ (reward change per timestep)
+        """
+        # Save current state
+        saved_state = self.state.clone()
+        saved_history = list(self.state_history)
+        saved_control = list(self.control_history)
+        saved_clf = list(self.clf_history)
+        saved_step = self._step_count
+        saved_done = self.is_done
+
+        reward_diffs = []
+
+        for _ in range(n_episodes):
+            self.reset()
+            prev_reward = None
+
+            for step in range(max_steps):
+                # Compute reward R(x) = V(next) - V(x) without noise
+                state_batch = self.state.unsqueeze(0)
+                with torch.no_grad():
+                    f, g = self.dynamics.control_affine_dynamics(state_batch)
+                    u = self.dynamics.u_nominal(state_batch)
+                    xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
+                    next_state = self.state + self.dt * xdot.squeeze(0)
+
+                V_cur = float(self.get_certificate_value(self.state))
+                V_next = float(self.get_certificate_value(next_state))
+                reward = V_next - V_cur
+
+                if prev_reward is not None:
+                    reward_diffs.append(abs(reward - prev_reward))
+
+                prev_reward = reward
+                self.state = next_state
+
+                if self.dynamics.goal_mask(self.state.unsqueeze(0)).item():
+                    break
+
+        # Restore state
+        self.state = saved_state
+        self.state_history = saved_history
+        self.control_history = saved_control
+        self.clf_history = saved_clf
+        self._step_count = saved_step
+        self.is_done = saved_done
+
+        if not reward_diffs:
+            return 0.1  # Fallback
+
+        gamma = float(np.percentile(reward_diffs, percentile))
+        return max(gamma, 1e-6)  # Avoid zero
 
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """

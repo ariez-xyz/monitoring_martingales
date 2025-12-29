@@ -5,13 +5,12 @@ from time import sleep
 from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
 
 def main():
-    # Create adapter with visualization every 5 steps
     print("Loading pendulum adapter...")
-    adapter = NeuralCLBFPendulum(vis_every=5, dt=0.0001, noise_scale=5)
+    adapter = NeuralCLBFPendulum(vis_every=5, dt=0.001, noise_scale=0.1, control_period=0.1)
 
     # Set a specific initial state for interesting dynamics
     # theta=1.2 rad (~69 deg), theta_dot=0.8 rad/s
-    adapter.reset(initial_state=torch.tensor([1.2, 1]))
+    adapter.reset(initial_state=torch.tensor([1.2, 3]))
 
     print(f"Initial state: θ={adapter.state[0]:.3f}, θ̇={adapter.state[1]:.3f}")
     print(f"Initial V: {adapter.clf_history[-1]:.4f}")
