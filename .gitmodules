@@ -1,0 +1,6 @@
+[submodule "neural_clbf"]
+	path = neural_clbf
+	url = https://github.com/ariez-xyz/neural_clbf.git
+[submodule "sablas"]
+	path = sablas
+	url = https://github.com/ariez-xyz/sablas.git
