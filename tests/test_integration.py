@@ -308,4 +308,6 @@ def test_base():
     drone = SablasDrone(vis_every=0)
     estimator = SamplingEstimator()
     m = NeuralCertificateMonitor(drone, estimator)
-    m.run()
+    # Consume the generator to ensure the loop runs
+    for _ in m.run():
+        pass
