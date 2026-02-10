@@ -95,7 +95,7 @@ def test_full_monitor_pendulum():
     print("=" * 70)
     print()
 
-    adapter = NeuralCLBFPendulum(dt=0.01, noise_scale=0.0)
+    adapter = NeuralCLBFPendulum(dt=0.01, noise_level=0.0)
 
     print(f"  System: Inverted Pendulum with learned CLF")
     print(f"  dt = {adapter.dt}")

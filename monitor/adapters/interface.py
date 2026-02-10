@@ -4,6 +4,15 @@ import torch
 import numpy as np
 
 class DynamicalSystemAdapter(ABC):
+    """
+    Base interface for monitor-compatible systems.
+
+    Noise contract:
+    - Adapters should accept a constructor argument named `noise_level`.
+    - `noise_level=0` should disable transition noise where feasible.
+    - Larger `noise_level` values should produce larger transition perturbations.
+    - The exact noise process is adapter-specific.
+    """
     state_history: List[torch.Tensor]
     @abstractmethod
     def done(self) -> bool:
@@ -157,4 +166,3 @@ class DynamicalSystemAdapter(ABC):
             return self.state                                    # type: ignore
         else:
             raise RuntimeError("No state provided and object has no valid state attribute")
-

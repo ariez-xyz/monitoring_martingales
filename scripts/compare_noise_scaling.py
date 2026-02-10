@@ -5,7 +5,7 @@ Tests the intuition that constant noise causes more violations near the origin
 (where steps are tiny) compared to step-scaled noise.
 
 Note: This script adds noise manually to compare different strategies.
-The adapter's built-in noise uses dt-scaled (Option B): radius = noise_scale * dt.
+The adapter's built-in noise uses dt-scaled (Option B): radius = noise_level * dt.
 """
 import torch
 import numpy as np

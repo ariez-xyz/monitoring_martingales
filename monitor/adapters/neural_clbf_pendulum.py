@@ -26,7 +26,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         checkpoint_path: str = "neural_clbf/saved_models/review/inverted_pendulum_clf.ckpt",
         dt: Optional[float] = None,
         control_period: Optional[float] = None,
-        noise_scale: float = 0.0,
+        noise_level: float = 0.0,
         vis_every: int = 0,
         vis_block: bool = False,
     ):
@@ -36,8 +36,9 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             dt: Timestep for simulation. If None, uses the model's default (0.01)
             control_period: How often to update control. If None, updates every step.
                            E.g., control_period=0.05 with dt=0.01 updates every 5 steps.
-            noise_scale: Noise radius = noise_scale * dt. Uniform ball distribution.
-                         E.g., noise_scale=1.0 with dt=0.01 gives radius=0.01.
+            noise_level: Noise parameter for this adapter.
+                        Noise radius = noise_level * dt using a uniform ball distribution.
+                        E.g., noise_level=1.0 with dt=0.01 gives radius=0.01.
             vis_every: Visualize every N steps (0 to disable)
             vis_block: If True, wait for keypress after each visualization
         """
@@ -48,7 +49,10 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
 
         # Use model's dt or override
         self.dt = dt if dt is not None else self.dynamics.dt
-        self.noise_scale = noise_scale
+        if noise_level < 0:
+            raise ValueError("noise_level must be non-negative")
+
+        self.noise_level = float(noise_level)
 
         # Control update frequency (None = every step)
         if control_period is not None:
@@ -151,9 +155,9 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             # Euler integration
             next_state = self.state + self.dt * xdot.squeeze(0)
 
-            # Add noise if configured (uniform ball, radius = noise_scale * dt)
-            if self.noise_scale > 0:
-                noise_radius = self.noise_scale * self.dt
+            # Add noise if configured (uniform ball, radius = noise_level * dt)
+            if self.noise_level > 0:
+                noise_radius = self.noise_level * self.dt
                 noise = _sample_uniform_ball(1, self.dynamics.n_dims).squeeze(0) * noise_radius
                 next_state = next_state + noise
 
@@ -180,8 +184,8 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
             deterministic_next = resolved_state + self.dt * xdot.squeeze(0)
 
-        if self.noise_scale > 0:
-            noise_radius = self.noise_scale * self.dt
+        if self.noise_level > 0:
+            noise_radius = self.noise_level * self.dt
             noise = _sample_uniform_ball(n_samples, self.dynamics.n_dims) * noise_radius
             next_states = deterministic_next.unsqueeze(0) + noise
         else:

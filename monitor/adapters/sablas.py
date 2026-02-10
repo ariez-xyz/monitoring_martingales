@@ -11,11 +11,15 @@ class SablasDrone(DynamicalSystemAdapter):
         k_obstacle: int = 8,
         use_estimated_param: bool = False,
         dt: float = 0.1,
+        noise_level: float = 0.1,
         vis_every: int = 0,
         vis_block: bool = False,
     ):
         self.k_obs = k_obstacle
         self.is_done = False
+        if noise_level < 0:
+            raise ValueError("noise_level must be non-negative")
+        self.noise_level = float(noise_level)
 
         if dt != 0.1:
             import warnings
@@ -53,7 +57,12 @@ class SablasDrone(DynamicalSystemAdapter):
         if use_estimated_param:
             estimated_param = np.load(open('./sablas/data/estimated_model_drone.npz', 'rb'))
 
-        self.env = Drone(dt=dt, k_obstacle=self.k_obs, estimated_param=estimated_param)
+        self.env = Drone(
+            dt=dt,
+            k_obstacle=self.k_obs,
+            noise_std=self.noise_level,
+            estimated_param=estimated_param,
+        )
 
         self.controller = NNController(n_state=8, k_obstacle=self.k_obs, m_control=3)
         self.controller.load_state_dict(torch.load('./sablas/data/drone_controller_weights.pth'))
@@ -291,4 +300,3 @@ class SablasDrone(DynamicalSystemAdapter):
             plt.waitforbuttonpress()
         else:
             plt.pause(0.01)
-
