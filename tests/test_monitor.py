@@ -1,42 +1,97 @@
-"""
-Monitor test suite - Index file.
+"""Tests for NeuralCertificateMonitor scheduling behavior."""
 
-Tests have been organized into focused modules:
+from typing import Any, List, Optional, Tuple
 
-  test_adapters.py
-    - test_neural_clbf_pendulum_adapter: Pendulum adapter smoke test
-    - test_pendulum_lipschitz_estimation: Dynamic Lipschitz estimation
-    - test_sablas_lipschitz_constant: Fixed Lipschitz with dt warning
-    - test_certificate_correlates_with_safety: CBF-safety correlation
-    - test_reward_sign_on_violation: Reward sign analysis
+import torch
 
-  test_estimators.py
-    - test_ci_coverage: SamplingEstimator CI coverage
-    - test_history_estimator_ci_coverage: HistoryEstimator CI coverage
-    - test_delayed_history_estimator: Delayed estimation with lookahead
-
-  test_weighting.py
-    - test_weighting_strategies: Weighting strategy validation
-    - test_weighting_with_lookahead: Lookahead weighting behavior
-
-  test_integration.py
-    - test_full_monitor_sablas: Full pipeline on Sablas drone
-    - test_full_monitor_pendulum: Full pipeline on pendulum
-    - test_history_estimator_with_lookahead: Lookahead comparison
-    - test_monitor_demo: Visual demo of estimator comparison
-    - test_base: Basic smoke test
-
-Run all tests:
-    pytest tests/ -v
-
-Run specific module:
-    pytest tests/test_integration.py -v -s
-
-Run specific test:
-    pytest tests/test_integration.py::test_monitor_demo -v -s
-"""
+from monitor import NeuralCertificateMonitor
+from monitor.adapters.interface import DynamicalSystemAdapter
+from monitor.estimators import Estimator
 
 
-def test_placeholder():
-    """Placeholder to ensure this file is recognized as a test module."""
-    pass
+class DummyAdapter(DynamicalSystemAdapter):
+    """Minimal deterministic adapter for monitor scheduling tests."""
+
+    def __init__(self, max_steps: int):
+        self.max_steps = max_steps
+        self.step_count = 0
+        self.state_history = [torch.tensor([0.0])]
+        self.state = self.state_history[-1]
+
+    def done(self) -> bool:
+        return self.step_count >= self.max_steps
+
+    def step(self) -> torch.Tensor:
+        self.step_count += 1
+        self.state = torch.tensor([float(self.step_count)])
+        self.state_history.append(self.state)
+        return self.state
+
+    def get_reward_bounds(self) -> Tuple[float, float]:
+        return (-1.0, 1.0)
+
+    def get_reward(
+        self, next_state: torch.Tensor, cur_state: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        _ = cur_state
+        return next_state.squeeze() * 0.0
+
+    def get_certificate_value(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if state is None:
+            state = self.state
+        return state.squeeze()
+
+    def get_state_history(self) -> torch.Tensor:
+        return torch.stack(self.state_history)
+
+    def sample(self, state: Optional[torch.Tensor] = None, n_samples: int = 1) -> torch.Tensor:
+        if state is None:
+            state = self.state
+        return state.unsqueeze(0).expand(n_samples, -1)
+
+    def get_state_dim(self) -> int:
+        return 1
+
+    def distance(self, state1: torch.Tensor, state2: torch.Tensor) -> float:
+        return float(torch.linalg.norm(state1 - state2))
+
+
+class DummyEstimator(Estimator):
+    def __init__(self):
+        self.calls: List[int] = []
+
+    def __call__(self, adapter: DummyAdapter):
+        self.calls.append(adapter.step_count)
+        return "?", 0.0, 0.0, {"step_count": adapter.step_count}
+
+
+def test_monitor_stride_default_every_step():
+    adapter = DummyAdapter(max_steps=5)
+    estimator = DummyEstimator()
+    monitor = NeuralCertificateMonitor(adapter, estimator)
+
+    results = list(monitor.run())
+    assert len(results) == 5
+    assert estimator.calls == [0, 1, 2, 3, 4]
+    assert adapter.step_count == 5
+
+
+def test_monitor_stride_skips_observations_but_not_steps():
+    adapter = DummyAdapter(max_steps=5)
+    estimator = DummyEstimator()
+    monitor = NeuralCertificateMonitor(adapter, estimator, monitor_stride=2)
+
+    results = list(monitor.run())
+    assert len(results) == 3
+    assert estimator.calls == [0, 2, 4]
+    assert adapter.step_count == 5
+
+
+def test_monitor_stride_must_be_positive():
+    adapter = DummyAdapter(max_steps=1)
+    estimator = DummyEstimator()
+    try:
+        _ = NeuralCertificateMonitor(adapter, estimator, monitor_stride=0)
+        assert False, "Expected ValueError for monitor_stride=0"
+    except ValueError:
+        pass
