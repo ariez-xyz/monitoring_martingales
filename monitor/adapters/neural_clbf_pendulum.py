@@ -8,16 +8,6 @@ import numpy as np
 from neural_clbf.controllers import NeuralCLBFController
 
 
-def _sample_uniform_ball(n_samples: int, dim: int) -> torch.Tensor:
-    """Sample uniformly from the unit ball in R^dim."""
-    # Sample direction uniformly on sphere
-    direction = torch.randn(n_samples, dim)
-    direction = direction / torch.norm(direction, dim=1, keepdim=True)
-    # Sample radius: for uniform in ball, use r ~ U[0,1]^(1/dim)
-    radius = torch.rand(n_samples, 1) ** (1.0 / dim)
-    return direction * radius
-
-
 class NeuralCLBFPendulum(DynamicalSystemAdapter):
     """Adapter for the neural_clbf inverted pendulum with learned CLF."""
 
@@ -33,9 +23,10 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         Args:
             checkpoint_path: Path to the pretrained checkpoint
             dt: Timestep for simulation. If None, uses the model's default (0.01)
-            noise_level: Noise parameter for this adapter.
-                        Noise radius = noise_level * dt using a uniform ball distribution.
-                        E.g., noise_level=1.0 with dt=0.01 gives radius=0.01.
+            noise_level: Control-noise magnitude for this adapter.
+                        Applies additive uniform-in-ball noise in control space.
+                        For pendulum (1D control), this is equivalent to uniform
+                        noise in [-noise_level, noise_level] added to torque.
             vis_every: Visualize every N steps (0 to disable)
             vis_block: If True, wait for keypress after each visualization
         """
@@ -85,7 +76,8 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             self.state = lower + torch.rand(self.dynamics.n_dims) * (upper - lower)
 
         self.state_history = [self.state.clone()]
-        self.control_history = []
+        self.control_history = []  # Nominal control history (for visualization)
+        self.applied_control_history = []  # Noisy control history (for diagnostics)
         self.clf_history = [float(self.get_certificate_value())]
         self._step_count = 0
         self._cached_control = None
@@ -139,8 +131,9 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             # Get control-affine dynamics
             f, g = self.dynamics.control_affine_dynamics(state_batch)
 
-            # Update control only at specified frequency (zero-order hold)
-            u = self._get_control(state_batch)
+            # Update nominal control only at specified frequency (zero-order hold).
+            u_nominal = self._get_control(state_batch)
+            u = u_nominal + self._sample_control_noise(n_samples=1)
 
             # Compute state derivative: ẋ = f + g @ u
             xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
@@ -148,15 +141,10 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             # Euler integration
             next_state = self.state + self.dt * xdot.squeeze(0)
 
-            # Add noise if configured (uniform ball, radius = noise_level * dt)
-            if self.noise_level > 0:
-                noise_radius = self.noise_level * self.dt
-                noise = _sample_uniform_ball(1, self.dynamics.n_dims).squeeze(0) * noise_radius
-                next_state = next_state + noise
-
         self.state = next_state
         self.state_history.append(self.state.clone())
-        self.control_history.append(float(u.squeeze()))
+        self.control_history.append(float(u_nominal.squeeze()))
+        self.applied_control_history.append(float(u.squeeze()))
         self.clf_history.append(float(self.get_certificate_value()))
         self._step_count += 1
 
@@ -173,20 +161,37 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
 
         with torch.no_grad():
             f, g = self.dynamics.control_affine_dynamics(state_batch)
-            # Sample path is side-effect free: compute control directly from the queried state.
-            u = self.dynamics.u_nominal(state_batch)
-            xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
-            deterministic_next = resolved_state + self.dt * xdot.squeeze(0)
+            # Sample path is side-effect free: compute nominal control directly.
+            u_nominal = self.dynamics.u_nominal(state_batch)
 
-        if self.noise_level > 0:
-            noise_radius = self.noise_level * self.dt
-            noise = _sample_uniform_ball(n_samples, self.dynamics.n_dims) * noise_radius
-            next_states = deterministic_next.unsqueeze(0) + noise
-        else:
-            # No noise: all samples are identical
-            next_states = deterministic_next.unsqueeze(0).expand(n_samples, -1)
+            # Draw control noise independently per sample.
+            u_samples = u_nominal.expand(n_samples, -1) + self._sample_control_noise(
+                n_samples=n_samples
+            )
+
+            f_samples = f.squeeze(-1).expand(n_samples, -1)
+            g_samples = g.expand(n_samples, -1, -1)
+            xdot_samples = f_samples + (g_samples @ u_samples.unsqueeze(-1)).squeeze(-1)
+            next_states = resolved_state.unsqueeze(0) + self.dt * xdot_samples
 
         return next_states
+
+    def _sample_control_noise(self, n_samples: int) -> torch.Tensor:
+        """Sample additive control noise in control space."""
+        if self.noise_level <= 0:
+            return torch.zeros(n_samples, self.dynamics.n_controls)
+
+        # Inverted pendulum has 1D control (torque), so sample directly from
+        # uniform[-noise_level, noise_level] instead of generic ball sampling.
+        if self.dynamics.n_controls == 1:
+            return (2.0 * torch.rand(n_samples, 1) - 1.0) * self.noise_level
+
+        # Generic fallback for multi-input systems.
+        dim = self.dynamics.n_controls
+        direction = torch.randn(n_samples, dim)
+        direction = direction / torch.norm(direction, dim=1, keepdim=True)
+        radius = torch.rand(n_samples, 1) ** (1.0 / dim)
+        return (direction * radius) * self.noise_level
 
     def _get_control(self, state_batch: torch.Tensor) -> torch.Tensor:
         """Get control using fixed-period zero-order hold tied to training dt."""
@@ -239,6 +244,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         saved_state = self.state.clone()
         saved_history = list(self.state_history)
         saved_control = list(self.control_history)
+        saved_applied_control = list(self.applied_control_history)
         saved_clf = list(self.clf_history)
         saved_step = self._step_count
         saved_done = self.is_done
@@ -275,6 +281,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self.state = saved_state
         self.state_history = saved_history
         self.control_history = saved_control
+        self.applied_control_history = saved_applied_control
         self.clf_history = saved_clf
         self._step_count = saved_step
         self.is_done = saved_done
