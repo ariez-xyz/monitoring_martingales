@@ -1,5 +1,4 @@
 """Tests for dynamical system adapters."""
-import warnings
 import numpy as np
 import torch
 
@@ -113,11 +112,11 @@ def test_pendulum_lipschitz_estimation():
 
 def test_sablas_lipschitz_constant():
     """
-    Test that the sablas adapter returns fixed Lipschitz constant and warns on dt change.
+    Test that the sablas adapter returns fixed Lipschitz constant with fixed control cadence.
 
     Verifies:
     1. Returns fixed gamma = 1.0 for default dt
-    2. Issues warning when dt != 0.1
+    2. Keeps control period fixed at 0.1s while dt changes simulation fidelity
     """
     from monitor.adapters.sablas import SablasDrone
 
@@ -128,17 +127,17 @@ def test_sablas_lipschitz_constant():
     gamma = adapter.get_lipschitz_constant()
 
     assert gamma == 1.0, f"Expected fixed gamma=1.0, got {gamma}"
-    print(f"  Default dt=0.1: gamma = {gamma}")
+    assert adapter.control_period == 0.1
+    assert adapter.update_control_every == 1
+    print(f"  Default dt=0.1: gamma = {gamma}, control period = {adapter.control_period}")
 
-    # Test warning on non-default dt
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        adapter_bad_dt = SablasDrone(dt=0.05)
-
-        assert len(w) == 1, f"Expected 1 warning, got {len(w)}"
-        assert "dt=0.05" in str(w[0].message), f"Warning should mention dt: {w[0].message}"
-        assert "0.1" in str(w[0].message), f"Warning should mention training dt: {w[0].message}"
-        print(f"  dt=0.05: Warning issued correctly")
+    # Smaller dt should keep control period fixed and increase hold count
+    adapter_fine = SablasDrone(dt=0.05)
+    assert adapter_fine.control_period == 0.1
+    assert adapter_fine.update_control_every == 2, (
+        f"Expected update_control_every=2 at dt=0.05, got {adapter_fine.update_control_every}"
+    )
+    print(f"  dt=0.05: update_control_every = {adapter_fine.update_control_every}")
 
     print("  Sablas Lipschitz constant works correctly!")
 

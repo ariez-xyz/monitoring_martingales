@@ -25,7 +25,6 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self,
         checkpoint_path: str = "neural_clbf/saved_models/review/inverted_pendulum_clf.ckpt",
         dt: Optional[float] = None,
-        control_period: Optional[float] = None,
         noise_level: float = 0.0,
         vis_every: int = 0,
         vis_block: bool = False,
@@ -34,8 +33,6 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         Args:
             checkpoint_path: Path to the pretrained checkpoint
             dt: Timestep for simulation. If None, uses the model's default (0.01)
-            control_period: How often to update control. If None, updates every step.
-                           E.g., control_period=0.05 with dt=0.01 updates every 5 steps.
             noise_level: Noise parameter for this adapter.
                         Noise radius = noise_level * dt using a uniform ball distribution.
                         E.g., noise_level=1.0 with dt=0.01 gives radius=0.01.
@@ -49,16 +46,15 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
 
         # Use model's dt or override
         self.dt = dt if dt is not None else self.dynamics.dt
+        # Keep control update period fixed to the model/training timestep.
+        self.control_period = float(self.dynamics.dt)
         if noise_level < 0:
             raise ValueError("noise_level must be non-negative")
 
         self.noise_level = float(noise_level)
 
-        # Control update frequency (None = every step)
-        if control_period is not None:
-            self.control_update_freq = max(1, int(round(control_period / self.dt)))
-        else:
-            self.control_update_freq = 1
+        # Control updates are held at the training cadence; dt only affects simulation fidelity.
+        self.update_control_every = max(1, int(round(self.control_period / self.dt)))
         self._cached_control: Optional[torch.Tensor] = None
 
         # Visualization settings
@@ -144,10 +140,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             f, g = self.dynamics.control_affine_dynamics(state_batch)
 
             # Update control only at specified frequency (zero-order hold)
-            if self._cached_control is None or self._step_count % self.control_update_freq == 0:
-                self._cached_control = self.dynamics.u_nominal(state_batch)
-
-            u = self._cached_control
+            u = self._get_control(state_batch)
 
             # Compute state derivative: ẋ = f + g @ u
             xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
@@ -180,6 +173,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
 
         with torch.no_grad():
             f, g = self.dynamics.control_affine_dynamics(state_batch)
+            # Sample path is side-effect free: compute control directly from the queried state.
             u = self.dynamics.u_nominal(state_batch)
             xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
             deterministic_next = resolved_state + self.dt * xdot.squeeze(0)
@@ -193,6 +187,16 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             next_states = deterministic_next.unsqueeze(0).expand(n_samples, -1)
 
         return next_states
+
+    def _get_control(self, state_batch: torch.Tensor) -> torch.Tensor:
+        """Get control using fixed-period zero-order hold tied to training dt."""
+        need_update = self._cached_control is None or self._step_count % self.update_control_every == 0
+        if need_update:
+            u = self.dynamics.u_nominal(state_batch)
+            self._cached_control = u
+            return u
+        # _cached_control is guaranteed non-None when no update is needed.
+        return self._cached_control  # type: ignore[return-value]
 
     def get_state_dim(self) -> int:
         """Returns state dimension (2 for inverted pendulum)."""

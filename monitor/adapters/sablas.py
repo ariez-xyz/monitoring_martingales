@@ -20,13 +20,8 @@ class SablasDrone(DynamicalSystemAdapter):
         if noise_level < 0:
             raise ValueError("noise_level must be non-negative")
         self.noise_level = float(noise_level)
-
-        if dt != 0.1:
-            import warnings
-            warnings.warn(
-                f"SablasDrone: dt={dt} differs from training dt=0.1. "
-                "Controller/CBF were trained with dt=0.1; results may be invalid."
-            )
+        # Keep control update period fixed to training cadence.
+        self.control_period = 0.1
 
         # Visualization settings
         self.vis_every = vis_every
@@ -63,6 +58,13 @@ class SablasDrone(DynamicalSystemAdapter):
             noise_std=self.noise_level,
             estimated_param=estimated_param,
         )
+        # dt controls simulation fidelity; control remains fixed at training cadence.
+        self.update_control_every = max(1, int(round(self.control_period / self.env.dt)))
+        self._cached_control: Optional[np.ndarray] = None
+
+        # Keep max episode duration comparable in physical time when dt changes.
+        baseline_dt = self.control_period
+        self.env.max_steps = max(1, int(round(self.env.max_steps * baseline_dt / self.env.dt)))
 
         self.controller = NNController(n_state=8, k_obstacle=self.k_obs, m_control=3)
         self.controller.load_state_dict(torch.load('./sablas/data/drone_controller_weights.pth'))
@@ -88,9 +90,10 @@ class SablasDrone(DynamicalSystemAdapter):
         self.state, self.obstacle, self.goal = self.env.reset()
         self.state_error = torch.zeros(1, self.get_state_dim(), dtype=torch.float32)
         self.state_history = [torch.from_numpy(self.state).float()]
+        self._cached_control = None
 
-    def _get_control_input(self, state: np.ndarray) -> np.ndarray:
-        """Helper function to compute the control input 'u'."""
+    def _compute_control_input(self, state: np.ndarray) -> np.ndarray:
+        """Compute a fresh control input for a given state."""
         u_nominal = self.env.nominal_controller(state, self.goal)
         u_tensor = self.controller(
             torch.from_numpy(state.reshape(1, 8)).float(), 
@@ -98,6 +101,20 @@ class SablasDrone(DynamicalSystemAdapter):
             torch.from_numpy(u_nominal.reshape(1, 3)).float(),
             self.state_error)
         return np.squeeze(u_tensor.detach().cpu().numpy())
+
+    def _get_control_input(self, state: np.ndarray) -> np.ndarray:
+        """Get held control input, updating only at fixed control cadence."""
+        need_update = self._cached_control is None or self._step_count % self.update_control_every == 0
+        if need_update:
+            self._cached_control = self._compute_control_input(state)
+        return self._cached_control
+
+    def _peek_control_input(self, state: np.ndarray) -> np.ndarray:
+        """Get control for hypothetical transitions without mutating held-control state."""
+        need_update = self._cached_control is None or self._step_count % self.update_control_every == 0
+        if need_update:
+            return self._compute_control_input(state)
+        return self._cached_control
 
     def done(self) -> bool:
         return self.is_done
@@ -198,7 +215,12 @@ class SablasDrone(DynamicalSystemAdapter):
         mutating the env's actual noise state.
         """
         resolved_state_np = self.resolve_state(state).numpy()
-        u = self._get_control_input(resolved_state_np)
+        if state is None:
+            # Use the same held-control policy as step() for the current rollout state.
+            u = self._peek_control_input(resolved_state_np)
+        else:
+            # For arbitrary queried states, compute a fresh control.
+            u = self._compute_control_input(resolved_state_np)
         dsdt = self.env.uncertain_dynamics(resolved_state_np, u)
 
         next_states = []
@@ -245,7 +267,10 @@ class SablasDrone(DynamicalSystemAdapter):
         So: E[Y] = x + (dsdt + 0.95 * env.noise) * dt
         """
         resolved_state_np = self.resolve_state(state).numpy()
-        u = self._get_control_input(resolved_state_np)
+        if state is None:
+            u = self._peek_control_input(resolved_state_np)
+        else:
+            u = self._compute_control_input(resolved_state_np)
         dsdt = self.env.uncertain_dynamics(resolved_state_np, u)
 
         # Expected noise: 95% of current sticky noise (position components zeroed)

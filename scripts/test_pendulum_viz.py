@@ -6,7 +6,7 @@ from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
 
 def main():
     print("Loading pendulum adapter...")
-    adapter = NeuralCLBFPendulum(vis_every=5, dt=0.001, noise_level=0.1, control_period=0.1)
+    adapter = NeuralCLBFPendulum(vis_every=5, dt=0.001, noise_level=0.1)
 
     # Set a specific initial state for interesting dynamics
     # theta=1.2 rad (~69 deg), theta_dot=0.8 rad/s
