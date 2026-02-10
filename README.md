@@ -11,43 +11,38 @@ The project uses a shared virtual environment for all submodules.
 uv venv --python 3.9
 source .venv/bin/activate  # or activate.fish
 
-# Install core dependencies
-uv pip install "pyyaml>=6.0"
-uv pip install pytorch-lightning==1.3.8 --no-deps
+# Install all dependencies (including submodules and core package)
+uv pip install -r requirements.txt
 
-# Clone and install neural_clbf (Apple Silicon compatible fork)
-git clone https://github.com/ariez-xyz/neural_clbf.git
-cd neural_clbf
-uv pip install -e .
-uv pip install -r requirements.txt --no-deps
-cd ..
+# Demo
+pytest -s tests/test_integration.py::test_monitor_demo
 
-# Clone and install sablas (Fork)
-git clone https://github.com/ariez-xyz/sablas.git
-cd sablas
-# (Add specific installation steps if any, or rely on root requirements)
-cd ..
-
-# Install this package in editable mode if necessary, or just run from root
+# Optional: run all tests
+pytest -s tests/
 ```
+
 
 ## Usage
 
-### Running Tests
+The monitor can be integrated into any control loop by writing an adapter (see `monitor/adapters/interface.py`). This repository includes adapters for `neural_clbf` and `sablas`.
 
-```bash
-# Run all tests
-pytest -s tests/
+```python
+from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+from monitor.estimators import HistoryEstimator
+from monitor.weighting import OptimalTemporalWeights
+from monitor.monitor import NeuralCertificateMonitor
 
-# Run specific tests
-pytest -s tests/test_monitor.py
+# 1. Initialize the system and the monitor
+adapter = NeuralCLBFPendulum(dt=0.01)
+weighting = OptimalTemporalWeights()
+estimator = HistoryEstimator(weighting, delta=0.01)
+monitor = NeuralCertificateMonitor(adapter, estimator)
+
+# 2. Run the control/monitor loop
+for safety, lower, upper, info in monitor.run():
+    print(f"Safety Status: {safety} | CI: [{lower:+.4f}, {upper:+.4f}] | info: {info}")
 ```
 
-### Scripts
-
-*   `scripts/check_jensen_gap.py`: Validates the Jensen gap assumption for the analytic estimator.
-*   `scripts/estimate_cbf_bounds.py`: Empirically estimates the bounds of the certificate function.
-*   `scripts/estimate_gamma.py`: Estimates the Lipschitz constant for the reward function.
 
 ## Methodology
 
@@ -55,7 +50,7 @@ The monitor estimates the expected reward $\mathbb{E}[R_t]$ (change in certifica
 
 $\mathbb{E}[R_t] \leq 0$
 
-Three strategies are implemented:
+Three strategies are implemented in `monitor/estimators.py`:
 
 ### 1. Analytic Estimator
 Computes $\mathbb{E}[R_t]$ directly using known system dynamics $P(x)$.
@@ -77,7 +72,8 @@ Estimates $\mathbb{E}[R_t]$ using past observed transitions $x_1, \dots, x_t$ wi
 ## Project Structure
 
 *   `monitor/`: Core monitoring logic.
-    *   `monitor.py`: Implementation of Estimators (Analytic, Sampling, History).
+    *   `monitor.py`: Simple convenience class looping the simulation until done.
+    *   `estimators.py`: Implementation of Estimators (Analytic, Sampling, History).
     *   `adapters/`: Interfaces for specific environments (Sablas, Neural-CLBF).
     *   `weighting.py`: Weighting strategies for history-based estimation.
 *   `neural_clbf/`: Submodule for Neural CLBF controllers (Evaluation only).
