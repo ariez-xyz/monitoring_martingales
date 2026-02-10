@@ -71,7 +71,7 @@ class HistoryEstimator(Estimator):
         """Compute the actual delay value (number of neighbors in one direction)."""
         if self.delay == "auto":
             if isinstance(self.weighting, OptimalTemporalWeights):
-                return self.weighting.get_optimal_m(adapter) // 2
+                return self.weighting.get_optimal_m(adapter)
             else:
                 # For non-optimal weighting, auto delay doesn't make sense
                 return 0

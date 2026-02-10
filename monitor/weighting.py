@@ -122,7 +122,7 @@ class OptimalTemporalWeights(WeightingStrategy):
         T = history_len - 1  # Latest available index
 
         # Compute optimal m
-        m = self.compute_optimal_m(adapter) // 2
+        m = self.compute_optimal_m(adapter)
 
         # Symmetric neighbors around t, bounded by available history
         if t - m < 0 or t + m >= T:
