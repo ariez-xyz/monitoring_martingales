@@ -1,6 +1,6 @@
 """Adapter for neural_clbf inverted pendulum system."""
 from .interface import DynamicalSystemAdapter
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 import torch
 import numpy as np
 
@@ -60,9 +60,9 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self.certificate_bounds: Tuple[float, float] = (0.0, 22.0)
 
         # Temporal Lipschitz constant γ = |ΔR|/k (reward change per timestep)
-        # Cached by dt since γ scales with timestep size
+        # Cached by (dt, noise_level) since both affect reward variation.
         # Used by OptimalTemporalWeights for m* = (c1/γ)^(2/3)
-        self._lipschitz_cache: dict = {}
+        self._lipschitz_cache: Dict[Tuple[float, float], float] = {}
 
         self.reset()
 
@@ -216,29 +216,57 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         return float(torch.linalg.norm(state1 - state2))
 
     def get_lipschitz_constant(self) -> float:
-        """Returns temporal Lipschitz constant γ = |ΔR|/k for expected rewards.
+        """Returns an empirical per-step drift bound proxy for current config.
 
-        Estimates γ on first call for current dt, then caches the result.
+        For the test-based monitor we use this as a proxy for B_k at fixed step
+        size. It is estimated conservatively from one-step |Delta V| samples and
+        cached by (dt, noise_level).
         """
-        if self.dt not in self._lipschitz_cache:
-            self._lipschitz_cache[self.dt] = self._estimate_lipschitz_constant()
-        return self._lipschitz_cache[self.dt]
+        cache_key = (float(self.dt), float(self.noise_level))
+
+        # Empirical preseeds (conservative rounded maxima) obtained with:
+        #   python scripts/check_pendulum_lipschitz_variance.py \
+        #     --fast-private --trials 10 --same-adapter-repeats 0 \
+        #     --n-episodes 100 --max-steps 20000 --percentile 99.999 \
+        #     --dt {0.001,0.01} --noise-level {0,0.1,1,10}
+        preseed = {
+            (0.001, 0.0): 0.20,
+            (0.001, 0.1): 0.20,
+            (0.001, 1.0): 0.20,
+            (0.001, 10.0): 0.25,
+            (0.01, 0.0): 1.95,
+            (0.01, 0.1): 1.90,
+            (0.01, 1.0): 2.00,
+            (0.01, 10.0): 2.50,
+        }
+        if cache_key in preseed and cache_key not in self._lipschitz_cache:
+            self._lipschitz_cache[cache_key] = preseed[cache_key]
+
+        if cache_key not in self._lipschitz_cache:
+            self._lipschitz_cache[cache_key] = self._estimate_lipschitz_constant()
+        return self._lipschitz_cache[cache_key]
 
     def _estimate_lipschitz_constant(
-        self, n_episodes: int = 30, max_steps: int = 20000, percentile: float = 99.999
-    ) -> float:
-        """Estimate temporal Lipschitz constant by running trajectories.
+        self,
+        n_episodes: int = 30,
+        max_steps: int = 20000,
+        percentile: float = 99.999,
+        return_diffs: bool = False,
+    ) -> Union[float, Tuple[float, List[float]]]:
+        """Estimate conservative one-step drift bound from rollout samples.
 
-        Computes γ = |ΔR|/k for adjacent timesteps (k=1) and returns the
-        specified percentile as a robust estimate.
+        At each state, evaluates reward for endpoint control noises
+        (+/- noise_level) and keeps max(|Delta V|). Returns a high percentile
+        over all collected samples.
 
         Args:
             n_episodes: Number of episodes to run
             max_steps: Max steps per episode
-            percentile: Percentile of |ΔR| values to return (default 99th)
+            percentile: Percentile of |Delta V| samples to return
 
         Returns:
-            Estimated temporal γ (reward change per timestep)
+            Estimated bound proxy.
+            If return_diffs=True, returns (bound, samples).
         """
         # Save current state
         saved_state = self.state.clone()
@@ -249,30 +277,49 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         saved_step = self._step_count
         saved_done = self.is_done
 
-        reward_diffs = []
+        # Per-step bound proxy samples for |Delta V| at each visited state.
+        step_bound_samples: List[float] = []
 
         for _ in range(n_episodes):
             self.reset()
-            prev_reward = None
-
             for step in range(max_steps):
-                # Compute reward R(x) = V(next) - V(x) without noise
+                # Compute a conservative one-step reward proxy at the current state:
+                # evaluate both endpoint control noises (+/- noise_level) and keep
+                # the larger absolute reward magnitude.
                 state_batch = self.state.unsqueeze(0)
                 with torch.no_grad():
                     f, g = self.dynamics.control_affine_dynamics(state_batch)
-                    u = self.dynamics.u_nominal(state_batch)
-                    xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
-                    next_state = self.state + self.dt * xdot.squeeze(0)
+                    u_nominal = self._get_control(state_batch)
+                    if self.noise_level > 0 and self.dynamics.n_controls == 1:
+                        noise_plus = torch.full((1, 1), self.noise_level, dtype=u_nominal.dtype)
+                        noise_minus = -noise_plus
+                        u_plus = u_nominal + noise_plus
+                        u_minus = u_nominal + noise_minus
+                        xdot_plus = f.squeeze(-1) + (g @ u_plus.unsqueeze(-1)).squeeze(-1)
+                        xdot_minus = f.squeeze(-1) + (g @ u_minus.unsqueeze(-1)).squeeze(-1)
+                        next_state_plus = self.state + self.dt * xdot_plus.squeeze(0)
+                        next_state_minus = self.state + self.dt * xdot_minus.squeeze(0)
+                    else:
+                        # Zero-noise case and generic multi-control fallback.
+                        xdot_nominal = f.squeeze(-1) + (g @ u_nominal.unsqueeze(-1)).squeeze(-1)
+                        next_state_plus = self.state + self.dt * xdot_nominal.squeeze(0)
+                        next_state_minus = next_state_plus
 
                 V_cur = float(self.get_certificate_value(self.state))
-                V_next = float(self.get_certificate_value(next_state))
-                reward = V_next - V_cur
+                reward_plus = float(self.get_certificate_value(next_state_plus)) - V_cur
+                reward_minus = float(self.get_certificate_value(next_state_minus)) - V_cur
+                step_bound = max(abs(reward_plus), abs(reward_minus))
+                step_bound_samples.append(step_bound)
 
-                if prev_reward is not None:
-                    reward_diffs.append(abs(reward - prev_reward))
+                # Roll out trajectory with a sampled noise draw to keep state coverage
+                # broad while using endpoint rewards for conservative local variation.
+                with torch.no_grad():
+                    u_rollout = u_nominal + self._sample_control_noise(n_samples=1)
+                    xdot_rollout = f.squeeze(-1) + (g @ u_rollout.unsqueeze(-1)).squeeze(-1)
+                    next_state_rollout = self.state + self.dt * xdot_rollout.squeeze(0)
 
-                prev_reward = reward
-                self.state = next_state
+                self.state = next_state_rollout
+                self._step_count += 1
 
                 if self.dynamics.goal_mask(self.state.unsqueeze(0)).item():
                     break
@@ -286,11 +333,17 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self._step_count = saved_step
         self.is_done = saved_done
 
-        if not reward_diffs:
-            return 0.1  # Fallback
+        if not step_bound_samples:
+            gamma = 0.1  # Fallback
+            if return_diffs:
+                return gamma, step_bound_samples
+            return gamma
 
-        gamma = float(np.percentile(reward_diffs, percentile))
-        return max(gamma, 1e-6)  # Avoid zero
+        gamma = float(np.percentile(step_bound_samples, percentile))
+        gamma = max(gamma, 1e-6)  # Avoid zero
+        if return_diffs:
+            return gamma, step_bound_samples
+        return gamma
 
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """

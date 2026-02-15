@@ -110,6 +110,57 @@ def test_pendulum_lipschitz_estimation():
     print("  Lipschitz estimation works correctly!")
 
 
+def test_pendulum_seeded_bounds_cover_observed_step_drift():
+    """
+    Validate that seeded pendulum B_k-style bounds cover observed one-step drift.
+
+    For each seeded (dt, noise_level) configuration, this test runs short
+    rollouts via the adapter API and checks:
+    |V(x_{t+1}) - V(x_t)| <= get_lipschitz_constant().
+    """
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+
+    seeded_bounds = {
+        (0.001, 0.0): 0.20,
+        (0.001, 0.1): 0.20,
+        (0.001, 1.0): 0.20,
+        (0.001, 10.0): 0.25,
+        (0.01, 0.0): 1.95,
+        (0.01, 0.1): 1.90,
+        (0.01, 1.0): 2.00,
+        (0.01, 10.0): 2.50,
+    }
+    tol = 1e-6
+
+    for i, ((dt, noise_level), expected_bound) in enumerate(seeded_bounds.items()):
+        np.random.seed(1000 + i)
+        torch.manual_seed(1000 + i)
+        adapter = NeuralCLBFPendulum(dt=dt, noise_level=noise_level)
+        gamma = adapter.get_lipschitz_constant()
+        assert abs(gamma - expected_bound) < tol, (
+            f"Unexpected cached bound for dt={dt}, noise={noise_level}: {gamma} vs {expected_bound}"
+        )
+
+        observed_max = 0.0
+        # Keep runtime small while still sampling multiple episodes/states.
+        for _ in range(3):
+            adapter.reset()
+            for _ in range(20000):
+                v_cur = float(adapter.get_certificate_value())
+                adapter.step()
+                v_next = float(adapter.get_certificate_value())
+                observed_drift = abs(v_next - v_cur)
+                print(observed_drift)
+                observed_max = max(observed_max, observed_drift)
+                if adapter.done():
+                    break
+
+        assert observed_max <= gamma + tol, (
+            f"Observed step drift exceeds cached bound for dt={dt}, noise={noise_level}: "
+            f"observed_max={observed_max:.6f}, gamma={gamma:.6f}"
+        )
+
+
 def test_sablas_lipschitz_constant():
     """
     Test that the sablas adapter returns fixed Lipschitz constant with fixed control cadence.

@@ -113,7 +113,7 @@ class HistoryEstimator(Estimator):
         DE = sum(w * gamma * dist(target, i) for i, w in enumerate(weights))
 
         # Statistical error
-        reward_bounds = adapter.get_reward_bounds() # TODO too loose (as in the city in southern france)
+        reward_bounds = adapter.get_reward_bounds() # TODO too loose
         sigma = (reward_bounds[1] - reward_bounds[0]) / 2  # sub-Gaussian norm from bounded rewards
 
         # V_t = Σ (w_i * σ)²
