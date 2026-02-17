@@ -70,25 +70,37 @@ class HypothesisTestingMonitor:
         return self.G_cache[n]
 
     def run(self) -> Generator[Tuple[Literal["F","?"], Any], None, None]:
-        n = 0
+        n = 0 # number of transitions taken
 
         try:
             while not self.adapter.done():
                 certificate_value = self.cur_cert_value()
                 self.adapter.step()
-                # here: n is index of current transition, starting from 0
                 reward = self.cur_cert_value() - certificate_value
                 self.Delta.append(reward)
+                n += 1
+                e_value = self.G(n)
+
+                info = {
+                    "n": n, 
+                    "e_value": e_value,
+                    "Delta_{n-1}": self.Delta[n - 1],
+                    "S_{n-1}": self.S(n - 1),
+                    "V_{n-1}": self.V(n - 1),
+                    "eta_{n-1}": self.eta(n - 1),
+                    "threshold": 1 / self.delta
+                }
 
                 if self.last_verdict == "F":
-                    yield "F", { "reason": "previous verdict is F" }
-                elif self.G(n) >= 1/self.delta:
+                    info["reason"] = "previous verdict is F"
+                    yield "F", info
+                elif e_value >= 1/self.delta:
                     self.last_verdict = "F"
-                    yield "F", { "reason": f"G_{n} >= {1/self.delta} (1/delta)" }
+                    info["reason"] = f"G_{n} >= {1/self.delta} (1/delta)"
+                    yield "F", info
                 else:
-                    yield "?", None
+                    yield "?", info
 
-                n += 1
 
         except KeyboardInterrupt:
             pass
