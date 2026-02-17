@@ -97,7 +97,6 @@ class HistoryEstimator(Estimator):
 
         # Get weights centered around target (allows lookahead when target < T)
         weights = self.weighting(adapter, target - 1)  # -1 because reward indices are 0 to T-1
-        print(T, target, delay, weights)
 
         # Weighted mean of observed rewards
         weighted_mean = sum(w * r for w, r in zip(weights, rewards))
