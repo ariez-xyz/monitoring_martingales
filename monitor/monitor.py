@@ -1,5 +1,4 @@
 from typing import Generator, Tuple, Literal, Any, List
-from warnings import warn
 from .adapters import DynamicalSystemAdapter
 from .estimators import Estimator
 
@@ -33,52 +32,62 @@ class HypothesisTestingMonitor:
         self.adapter = adapter
         self.delta = delta
         self.last_verdict = "?"
-        self.G: List[float] = [1, 1]
-        self.S: List[float] = [0, 0]
-        self.V: List[float] = [0, 0]
-        self.deltaX: List[float] = [0]
-        self.last_certificate_value: float = -1
+        self.G_cache: List[float] = [1]
+        self.S_cache: List[float] = [0]
+        self.V_cache: List[float] = [0]
+        self.Delta: List[float] = []
 
     def cur_cert_value(self) -> float:
         return float(self.adapter.get_certificate_value())
 
-    def eta(self, k) -> float:
-        S, V, B = self.S, self.V, self.adapter.get_lipschitz_constant() # match paper notation
-        # Note: We assume adapter.dt never varies, so B_k = B for all k
-        return min(1/B, max(0, S[k-1] / (V[k-1] + B**2)))
+    def eta(self, n) -> float:
+        # Note: We assume adapter.dt never varies, so B_n = B for all n
+        B = self.adapter.get_lipschitz_constant() 
+        return min(1/B, max(0, self.S(n-1) / (self.V(n-1) + B**2)))
+
+    def S(self, n) -> float:
+        assert len(self.Delta) >= n-1
+        if n <= 0: return 0
+        for k in range(len(self.S_cache), n+1):
+            next_S = self.S_cache[-1] + self.Delta[k-1]
+            self.S_cache.append(next_S)
+        return self.S_cache[n]
+
+    def V(self, n) -> float:
+        assert len(self.Delta) >= n-1
+        if n <= 0: return 0
+        for k in range(len(self.V_cache), n+1):
+            next_V = self.V_cache[-1] + self.Delta[k-1] ** 2
+            self.V_cache.append(next_V)
+        return self.V_cache[n]
+
+    def G(self, n) -> float:
+        assert len(self.Delta) >= n-1
+        if n <= 0: return 1
+        for k in range(len(self.G_cache), n+1):
+            next_G = self.G_cache[-1] * (1 + self.eta(k-1) * self.Delta[k-1])
+            self.G_cache.append(next_G)
+        return self.G_cache[n]
 
     def run(self) -> Generator[Tuple[Literal["F","?"], Any], None, None]:
-        n = 0 # Step index
-        self.last_certificate_value = self.cur_cert_value()
+        n = 0
 
         try:
             while not self.adapter.done():
+                certificate_value = self.cur_cert_value()
+                self.adapter.step()
+                # here: n is index of current transition, starting from 0
+                reward = self.cur_cert_value() - certificate_value
+                self.Delta.append(reward)
+
                 if self.last_verdict == "F":
                     yield "F", { "reason": "previous verdict is F" }
-                    break
-
-                certificate_value = self.cur_cert_value()
-                reward = certificate_value - self.last_certificate_value
-                self.deltaX.append(reward)
-
-                if len(self.G) <= n: # update G,S,V on every index n>=2
-                    self.last_certificate_value = certificate_value
-
-                    G_n = self.G[n-1] * (1 + self.eta(n-1) * self.deltaX[n-1])
-                    S_n = self.S[n-1] + self.deltaX[n-1]
-                    V_n = self.V[n-1] + (self.deltaX[n-1] ** 2)
-
-                    self.G.append(G_n)
-                    self.S.append(S_n)
-                    self.V.append(V_n)
-
-                if self.G[n] >= 1/self.delta:
+                elif self.G(n) >= 1/self.delta:
                     self.last_verdict = "F"
-                    yield "F", { "reason": f"G[{n}] >= {1/self.delta} (1/delta)" }
+                    yield "F", { "reason": f"G_{n} >= {1/self.delta} (1/delta)" }
                 else:
                     yield "?", None
 
-                self.adapter.step()
                 n += 1
 
         except KeyboardInterrupt:

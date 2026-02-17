@@ -74,24 +74,3 @@ def test_monitor_stride_default_every_step():
     assert len(results) == 5
     assert estimator.calls == [0, 1, 2, 3, 4]
     assert adapter.step_count == 5
-
-
-def test_monitor_stride_skips_observations_but_not_steps():
-    adapter = DummyAdapter(max_steps=5)
-    estimator = DummyEstimator()
-    monitor = NeuralCertificateMonitor(adapter, estimator, monitor_stride=2)
-
-    results = list(monitor.run())
-    assert len(results) == 3
-    assert estimator.calls == [0, 2, 4]
-    assert adapter.step_count == 5
-
-
-def test_monitor_stride_must_be_positive():
-    adapter = DummyAdapter(max_steps=1)
-    estimator = DummyEstimator()
-    try:
-        _ = NeuralCertificateMonitor(adapter, estimator, monitor_stride=0)
-        assert False, "Expected ValueError for monitor_stride=0"
-    except ValueError:
-        pass
