@@ -309,9 +309,10 @@ def test_hypothesis_monitor_pendulum_smoke():
     from monitor import HypothesisTestingMonitor
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
     from monitor.estimators import SamplingEstimator
+    import matplotlib.pyplot as plt
 
     dt = 0.01
-    adapter = NeuralCLBFPendulum(dt=dt, noise_level=10.0)
+    adapter = NeuralCLBFPendulum(dt=dt, noise_level=10.0, vis_every=10, certificate_slope=0.5)
     monitor = HypothesisTestingMonitor(adapter=adapter, delta=0.01)
     sampling = SamplingEstimator(delta=0.01)
 
@@ -363,8 +364,12 @@ def test_hypothesis_monitor_pendulum_smoke():
 
         n_steps += 1
         if verdict == "F":
-            saw_false = True
-            break
+            if not saw_false:
+                saw_false = True
+                if hasattr(adapter, "mark_monitor_rejection"):
+                    adapter.mark_monitor_rejection(step)
+                if hasattr(adapter, "_visualize"):
+                    adapter._visualize()
         if n_steps >= max_steps:
             break
 
@@ -372,6 +377,11 @@ def test_hypothesis_monitor_pendulum_smoke():
     print(f"  Steps executed: {n_steps}")
     print(f"  Rejected (F):   {saw_false}")
     print("=" * 90)
+
+    # Keep the latest visualization open for manual inspection when running this
+    # smoke test interactively.
+    if getattr(adapter, "_vis_fig", None) is not None:
+        plt.show(block=True)
 
     assert n_steps > 0, "Expected at least one monitor step"
     assert n_steps <= max_steps, "Smoke test exceeded max_steps cap"

@@ -18,6 +18,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         noise_level: float = 0.0,
         vis_every: int = 0,
         vis_block: bool = False,
+        certificate_slope: float = 0.0,
     ):
         """
         Args:
@@ -64,7 +65,14 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         # Used by OptimalTemporalWeights for m* = (c1/γ)^(2/3)
         self._lipschitz_cache: Dict[Tuple[float, float], float] = {}
 
+        self.certificate_slope = certificate_slope
+
         self.reset()
+
+    def mark_monitor_rejection(self, step_index: int):
+        """Record the first monitor rejection step for visualization."""
+        if self._monitor_reject_step is None:
+            self._monitor_reject_step = int(step_index)
 
     def reset(self, initial_state: Optional[torch.Tensor] = None):
         """Reset the simulation."""
@@ -78,10 +86,11 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self.state_history = [self.state.clone()]
         self.control_history = []  # Nominal control history (for visualization)
         self.applied_control_history = []  # Noisy control history (for diagnostics)
-        self.clf_history = [float(self.get_certificate_value())]
         self._step_count = 0
+        self.clf_history = [float(self.get_certificate_value())]
         self._cached_control = None
         self.is_done = False
+        self._monitor_reject_step = None
 
     def done(self) -> bool:
         """Check if simulation is complete (goal reached)."""
@@ -121,6 +130,9 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         lo, hi = self.certificate_bounds
         V = torch.clamp(V, lo, hi)
 
+        # Optional affine drift used in stress tests.
+        V = V + (self._step_count * self.certificate_slope)
+
         return V.squeeze()
 
     def step(self) -> torch.Tensor:
@@ -145,8 +157,8 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self.state_history.append(self.state.clone())
         self.control_history.append(float(u_nominal.squeeze()))
         self.applied_control_history.append(float(u.squeeze()))
-        self.clf_history.append(float(self.get_certificate_value()))
         self._step_count += 1
+        self.clf_history.append(float(self.get_certificate_value()))
 
         # Visualization
         if self.vis_every > 0 and self._step_count % self.vis_every == 0:
@@ -379,12 +391,23 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         theta = history[:, 0]
         theta_dot = history[:, 1]
         t = np.arange(len(history)) * self.dt
+        reject_step = self._monitor_reject_step
 
         # --- Top Left: Phase Space (θ vs θ̇) ---
         ax_phase.clear()
         ax_phase.plot(theta, theta_dot, 'b-', alpha=0.6, linewidth=1, label='Trajectory')
         ax_phase.plot(theta[-1], theta_dot[-1], 'ro', markersize=10, label='Current')
         ax_phase.plot(0, 0, 'g*', markersize=15, label='Goal')
+        if reject_step is not None and 0 <= reject_step < len(history):
+            ax_phase.plot(
+                theta[reject_step],
+                theta_dot[reject_step],
+                marker='x',
+                color='orange',
+                markersize=10,
+                mew=2,
+                label='Monitor Reject',
+            )
         ax_phase.set_xlabel('θ (rad)')
         ax_phase.set_ylabel('θ̇ (rad/s)')
         ax_phase.set_title('Phase Space')
@@ -429,6 +452,14 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         if self.control_history:
             t_ctrl = t[1:]  # control starts at step 1
             ax_time.plot(t_ctrl, self.control_history, 'r-', label='u', linewidth=1.5, alpha=0.7)
+        if reject_step is not None and 0 <= reject_step < len(t):
+            ax_time.axvline(
+                x=t[reject_step],
+                color='orange',
+                linestyle='--',
+                linewidth=1.5,
+                label='Reject',
+            )
         ax_time.set_xlabel('Time (s)')
         ax_time.set_ylabel('Value')
         ax_time.set_title('States & Control')
@@ -440,12 +471,22 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         ax_clf.clear()
         ax_clf.plot(t, self.clf_history, 'purple', linewidth=2)
         ax_clf.fill_between(t, 0, self.clf_history, alpha=0.3, color='purple')
+        if reject_step is not None and 0 <= reject_step < len(t):
+            ax_clf.axvline(
+                x=t[reject_step],
+                color='orange',
+                linestyle='--',
+                linewidth=1.5,
+                label='Reject',
+            )
         ax_clf.set_xlabel('Time (s)')
         ax_clf.set_ylabel('V(x)')
         ax_clf.set_title(f'CLF Value (V={self.clf_history[-1]:.4f})')
         ax_clf.grid(True, alpha=0.3)
         ax_clf.set_ylim(bottom=0)
         ax_clf.axhline(y=0, color='k', linewidth=0.5)
+        if reject_step is not None:
+            ax_clf.legend(loc='upper left')
 
         plt.tight_layout()
         self._vis_fig.canvas.draw()
