@@ -299,6 +299,84 @@ def test_monitor_demo():
     print("=" * 70)
 
 
+def test_hypothesis_monitor_pendulum_smoke():
+    """
+    Smoke test: run HypothesisTestingMonitor on the pendulum adapter.
+
+    This is a runner-style integration test that prints per-step state and
+    e-process value for quick manual inspection.
+    """
+    from monitor import HypothesisTestingMonitor
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+    from monitor.estimators import SamplingEstimator
+
+    dt = 0.01
+    adapter = NeuralCLBFPendulum(dt=dt, noise_level=10.0)
+    monitor = HypothesisTestingMonitor(adapter=adapter, delta=0.01)
+    sampling = SamplingEstimator(delta=0.01)
+
+    max_steps = 2000
+    n_steps = 0
+    saw_false = False
+
+    print("\n")
+    print("=" * 90)
+    print(f"  HYPOTHESIS MONITOR SMOKE TEST (Inverted Pendulum, dt={dt})")
+    print("=" * 90)
+    print()
+
+    print("-" * 90)
+    print(
+        f"  {'Step':<6} {'theta':<10} {'theta_dot':<10} {'V(x)':<9} {'Verdict':<8} "
+        f"{'G_n':<10} {'eta':<10} {'S':<10} {'V':<10} {'Delta':<10} {'Sampling':<24} {'Reason'}"
+    )
+    print("-" * 90)
+
+    for step, (verdict, info) in enumerate(monitor.run(), start=1):
+        state = adapter.state
+        theta = float(state[0])
+        theta_dot = float(state[1])
+        cert_value = float(adapter.get_certificate_value())
+
+        e_value = float("nan")
+        eta = float("nan")
+        s_prev = float("nan")
+        v_prev = float("nan")
+        delta_n = float("nan")
+        sampling_str = "-"
+        reason = "-"
+        if isinstance(info, dict):
+            reason = str(info.get("reason", "-"))
+            e_value = float(info.get("e_value", float("nan")))
+            eta = float(info.get("eta_{n-1}", float("nan")))
+            s_prev = float(info.get("S_{n-1}", float("nan")))
+            v_prev = float(info.get("V_{n-1}", float("nan")))
+            delta_n = float(info.get("Delta_{n-1}", float("nan")))
+
+        s_safety, s_lo, s_hi, _ = sampling(adapter)
+        sampling_str = f"{s_safety}[{s_lo:+.3f},{s_hi:+.3f}]"
+
+        print(
+            f"  {step:<6} {theta:<+10.6f} {theta_dot:<+10.6f} {cert_value:<9.6f} {verdict:<8} "
+            f"{e_value:<10.6f} {eta:<10.6f} {s_prev:<10.6f} {v_prev:<10.6f} {delta_n:<10.6f} {sampling_str:<24} {reason}"
+        )
+
+        n_steps += 1
+        if verdict == "F":
+            saw_false = True
+            break
+        if n_steps >= max_steps:
+            break
+
+    print("-" * 90)
+    print(f"  Steps executed: {n_steps}")
+    print(f"  Rejected (F):   {saw_false}")
+    print("=" * 90)
+
+    assert n_steps > 0, "Expected at least one monitor step"
+    assert n_steps <= max_steps, "Smoke test exceeded max_steps cap"
+
+
 def test_base():
     """Basic smoke test - just runs the monitor without assertions."""
     from monitor import NeuralCertificateMonitor
