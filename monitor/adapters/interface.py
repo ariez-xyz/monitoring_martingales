@@ -157,7 +157,7 @@ class DynamicalSystemAdapter(ABC):
         raise NotImplementedError("Analytic expected next state not available for this adapter")
 
     def resolve_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Returns the dimension of the state space."""
+        """Returns the provided state tensor, or falls back to self.state if no state is provided."""
         if state is not None: 
             return state
         elif hasattr(self, 'state') and self.state is not None:  # type: ignore
