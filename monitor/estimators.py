@@ -142,7 +142,7 @@ class SamplingEstimator(Estimator):
         self.delta = delta
         self.hoeffding_cache = {}
 
-    def __call__(self, adapter):
+    def __call__(self, adapter, max_extra: int = 4096):
         sampled_states = adapter.sample(n_samples=512)
         rewards = adapter.get_reward(sampled_states)
 
@@ -154,7 +154,7 @@ class SamplingEstimator(Estimator):
             ci = self._hoeffding_ci(adapter, rewards.shape[0])
             mean = rewards.mean().item()
             lower, upper = (mean-ci, mean+ci)
-            if upper < 0 or lower > 0:
+            if upper < 0 or lower > 0 or n_extra >= max_extra:
                 break
 
         safety = "T" if upper < 0 else "F" if lower > 0 else "?" # type: ignore[possibly-unbound]
