@@ -308,15 +308,18 @@ def test_hypothesis_monitor_pendulum_smoke():
     """
     from monitor import HypothesisTestingMonitor
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
-    from monitor.estimators import SamplingEstimator
     import matplotlib.pyplot as plt
 
-    dt = 0.01
-    adapter = NeuralCLBFPendulum(dt=dt, noise_level=10.0, vis_every=10, certificate_slope=0.5)
-    monitor = HypothesisTestingMonitor(adapter=adapter, delta=0.01)
-    sampling = SamplingEstimator(delta=0.01)
+    dt = 0.001
+    use_sampling_monitor = True
+    adapter = NeuralCLBFPendulum(dt=dt, noise_level=10.0, vis_every=50, certificate_slope=0.0)
+    monitor = HypothesisTestingMonitor(adapter=adapter, delta=0.05)
+    sampling = None
+    if use_sampling_monitor:
+        from monitor.estimators import SamplingEstimator
+        sampling = SamplingEstimator(delta=0.05)
 
-    max_steps = 2000
+    max_steps = 20000
     n_steps = 0
     saw_false = False
 
@@ -327,10 +330,14 @@ def test_hypothesis_monitor_pendulum_smoke():
     print()
 
     print("-" * 90)
-    print(
+    header = (
         f"  {'Step':<6} {'theta':<10} {'theta_dot':<10} {'V(x)':<9} {'Verdict':<8} "
-        f"{'G_n':<10} {'eta':<10} {'S':<10} {'V':<10} {'Delta':<10} {'Sampling':<24} {'Reason'}"
+        f"{'G_n':<10} {'eta':<10} {'S':<10} {'V':<10} {'Delta':<10}"
     )
+    if use_sampling_monitor:
+        header += f" {'Sampling':<24}"
+    header += " Reason"
+    print(header)
     print("-" * 90)
 
     for step, (verdict, info) in enumerate(monitor.run(), start=1):
@@ -344,7 +351,7 @@ def test_hypothesis_monitor_pendulum_smoke():
         s_prev = float("nan")
         v_prev = float("nan")
         delta_n = float("nan")
-        sampling_str = "-"
+        sampling_str = ""
         reason = "-"
         if isinstance(info, dict):
             reason = str(info.get("reason", "-"))
@@ -354,13 +361,18 @@ def test_hypothesis_monitor_pendulum_smoke():
             v_prev = float(info.get("V_{n-1}", float("nan")))
             delta_n = float(info.get("Delta_{n-1}", float("nan")))
 
-        s_safety, s_lo, s_hi, _ = sampling(adapter)
-        sampling_str = f"{s_safety}[{s_lo:+.3f},{s_hi:+.3f}]"
+        if sampling is not None:
+            s_safety, s_lo, s_hi, _ = sampling(adapter)
+            sampling_str = f"{s_safety}[{s_lo:+.3f},{s_hi:+.3f}]"
 
-        print(
+        row = (
             f"  {step:<6} {theta:<+10.6f} {theta_dot:<+10.6f} {cert_value:<9.6f} {verdict:<8} "
-            f"{e_value:<10.6f} {eta:<10.6f} {s_prev:<10.6f} {v_prev:<10.6f} {delta_n:<10.6f} {sampling_str:<24} {reason}"
+            f"{e_value:<10.6f} {eta:<10.6f} {s_prev:<10.6f} {v_prev:<10.6f} {delta_n:<10.6f}"
         )
+        if sampling is not None:
+            row += f" {sampling_str:<24}"
+        row += f" {reason}"
+        print(row)
 
         n_steps += 1
         if verdict == "F":
@@ -381,10 +393,63 @@ def test_hypothesis_monitor_pendulum_smoke():
     # Keep the latest visualization open for manual inspection when running this
     # smoke test interactively.
     if getattr(adapter, "_vis_fig", None) is not None:
-        plt.show(block=True)
+        plt.show(block=False)
 
     assert n_steps > 0, "Expected at least one monitor step"
     assert n_steps <= max_steps, "Smoke test exceeded max_steps cap"
+
+
+def test_hypothesis_monitor_becomes_more_suspicious_under_input_flip_fault():
+    """Injected control-sign faults should increase the e-process."""
+    import torch
+    from monitor import HypothesisTestingMonitor
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+
+    initial_state = torch.tensor([1.0, 0.5])
+    max_steps = 400
+
+    nominal = NeuralCLBFPendulum(
+        dt=0.01,
+        noise_level=0.0,
+        flip_inputs_prob_to=0.0,
+        flip_inputs_prob_from=0.0,
+    )
+    faulty = NeuralCLBFPendulum(
+        dt=0.01,
+        noise_level=0.0,
+        flip_inputs_prob_to=1.0,
+        flip_inputs_prob_from=0.0,
+    )
+
+    nominal.reset(initial_state=initial_state)
+    faulty.reset(initial_state=initial_state)
+
+    nominal_monitor = HypothesisTestingMonitor(nominal, delta=0.01)
+    faulty_monitor = HypothesisTestingMonitor(faulty, delta=0.01)
+
+    nominal_max_e = 1.0
+    faulty_max_e = 1.0
+    faulty_rejected = False
+
+    for step, ((nominal_verdict, nominal_info), (faulty_verdict, faulty_info)) in enumerate(
+        zip(nominal_monitor.run(), faulty_monitor.run()),
+        start=1,
+    ):
+        nominal_max_e = max(nominal_max_e, float(nominal_info["e_value"]))
+        faulty_max_e = max(faulty_max_e, float(faulty_info["e_value"]))
+        if faulty_verdict == "F":
+            faulty_rejected = True
+            break
+        if step >= max_steps:
+            break
+
+    assert faulty_max_e > nominal_max_e, (
+        f"Expected input-flip fault to raise suspicion, got nominal_max_e={nominal_max_e}, "
+        f"faulty_max_e={faulty_max_e}"
+    )
+    assert faulty_rejected or faulty_max_e >= 2.0, (
+        f"Expected strong suspicion under flip fault, got faulty_max_e={faulty_max_e}"
+    )
 
 
 def test_base():

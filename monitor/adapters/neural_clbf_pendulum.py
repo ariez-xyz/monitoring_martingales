@@ -19,6 +19,8 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         vis_every: int = 0,
         vis_block: bool = False,
         certificate_slope: float = 0.0,
+        flip_inputs_prob_to: float = 0.0,
+        flip_inputs_prob_from: float = 0.0,
     ):
         """
         Args:
@@ -42,6 +44,10 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self.control_period = float(self.dynamics.dt)
         if noise_level < 0:
             raise ValueError("noise_level must be non-negative")
+        if not 0.0 <= flip_inputs_prob_to <= 1.0:
+            raise ValueError("flip_inputs_prob_to must be in [0, 1]")
+        if not 0.0 <= flip_inputs_prob_from <= 1.0:
+            raise ValueError("flip_inputs_prob_from must be in [0, 1]")
 
         self.noise_level = float(noise_level)
 
@@ -66,6 +72,9 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self._lipschitz_cache: Dict[Tuple[float, float], float] = {}
 
         self.certificate_slope = certificate_slope
+        self.flip_inputs_state = False
+        self.flip_inputs_prob_to = float(flip_inputs_prob_to)
+        self.flip_inputs_prob_from = float(flip_inputs_prob_from)
 
         self.reset()
 
@@ -91,6 +100,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self._cached_control = None
         self.is_done = False
         self._monitor_reject_step = None
+        self.flip_inputs_state = False
 
     def done(self) -> bool:
         """Check if simulation is complete (goal reached)."""
@@ -144,7 +154,8 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             f, g = self.dynamics.control_affine_dynamics(state_batch)
 
             # Update nominal control only at specified frequency (zero-order hold).
-            u_nominal = self._get_control(state_batch)
+            u_nominal = self._get_control(state_batch, use_hold=True)
+
             u = u_nominal + self._sample_control_noise(n_samples=1)
 
             # Compute state derivative: ẋ = f + g @ u
@@ -159,6 +170,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self.applied_control_history.append(float(u.squeeze()))
         self._step_count += 1
         self.clf_history.append(float(self.get_certificate_value()))
+        self._advance_flip_mode()
 
         # Visualization
         if self.vis_every > 0 and self._step_count % self.vis_every == 0:
@@ -170,11 +182,13 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         """Sample n next states (with noise if configured)."""
         resolved_state = self.resolve_state(state)
         state_batch = resolved_state.unsqueeze(0)
+        use_hold = state is None
 
         with torch.no_grad():
             f, g = self.dynamics.control_affine_dynamics(state_batch)
-            # Sample path is side-effect free: compute nominal control directly.
-            u_nominal = self.dynamics.u_nominal(state_batch)
+            # For the live state, mirror the currently held control. For
+            # hypothetical queries, recompute control at the provided state.
+            u_nominal = self._get_control(state_batch, use_hold=use_hold)
 
             # Draw control noise independently per sample.
             u_samples = u_nominal.expand(n_samples, -1) + self._sample_control_noise(
@@ -205,15 +219,37 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         radius = torch.rand(n_samples, 1) ** (1.0 / dim)
         return (direction * radius) * self.noise_level
 
-    def _get_control(self, state_batch: torch.Tensor) -> torch.Tensor:
-        """Get control using fixed-period zero-order hold tied to training dt."""
-        need_update = self._cached_control is None or self._step_count % self.update_control_every == 0
-        if need_update:
-            u = self.dynamics.u_nominal(state_batch)
-            self._cached_control = u
-            return u
-        # _cached_control is guaranteed non-None when no update is needed.
-        return self._cached_control  # type: ignore[return-value]
+    def _get_control(self, state_batch: torch.Tensor, use_hold: bool = False) -> torch.Tensor:
+        """Return the controller output for this query.
+
+        `use_hold=True` mirrors the live runtime system and may return the
+        currently held control. `use_hold=False` recomputes the nominal control
+        from the provided state batch.
+        """
+        if use_hold:
+            if state_batch.dim() != 2 or state_batch.shape[0] != 1:
+                raise ValueError("Held-control queries require a single-state batch of shape (1, n_dims)")
+            need_update = self._step_count % self.update_control_every == 0
+            if self._cached_control is None or need_update:
+                u_nominal = self.dynamics.u_nominal(state_batch)
+                self._cached_control = u_nominal
+            else:
+                u_nominal = self._cached_control
+        else:
+            u_nominal = self.dynamics.u_nominal(state_batch)
+
+        if self.flip_inputs_state:
+            u_nominal = -u_nominal
+        return u_nominal
+
+    def _advance_flip_mode(self) -> None:
+        """Advance the hidden control-sign fault mode after a step."""
+        if self.flip_inputs_state:
+            if np.random.rand() < self.flip_inputs_prob_from:
+                self.flip_inputs_state = False
+        elif np.random.rand() < self.flip_inputs_prob_to:
+            self.flip_inputs_state = True
+
 
     def get_state_dim(self) -> int:
         """Returns state dimension (2 for inverted pendulum)."""
@@ -366,10 +402,11 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         """
         resolved_state = self.resolve_state(state)
         state_batch = resolved_state.unsqueeze(0)
+        use_hold = state is None
 
         with torch.no_grad():
             f, g = self.dynamics.control_affine_dynamics(state_batch)
-            u = self.dynamics.u_nominal(state_batch)
+            u = self._get_control(state_batch, use_hold=use_hold)
             xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
             expected_next = resolved_state + self.dt * xdot.squeeze(0)
 

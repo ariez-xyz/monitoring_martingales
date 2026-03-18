@@ -60,6 +60,69 @@ def test_neural_clbf_pendulum_adapter():
     print(f"  Adapter works correctly!")
 
 
+def test_pendulum_flip_fault_affects_sampling_and_expected_next_state():
+    """Flip fault mode should be reflected by sample() and get_expected_next_state()."""
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+
+    torch.manual_seed(0)
+    adapter = NeuralCLBFPendulum(dt=0.01, noise_level=0.0)
+    state = torch.tensor([1.0, 0.5])
+    adapter.reset(initial_state=state)
+
+    nominal_next = adapter.get_expected_next_state(state)
+    nominal_samples = adapter.sample(state, n_samples=4)
+
+    adapter.flip_inputs_state = True
+    flipped_next = adapter.get_expected_next_state(state)
+    flipped_samples = adapter.sample(state, n_samples=4)
+
+    assert nominal_samples.shape == (4, 2)
+    assert flipped_samples.shape == (4, 2)
+    assert torch.allclose(nominal_samples, nominal_next.unsqueeze(0).expand_as(nominal_samples))
+    assert torch.allclose(flipped_samples, flipped_next.unsqueeze(0).expand_as(flipped_samples))
+    assert not torch.allclose(nominal_next, flipped_next), (
+        "Expected flip fault to change one-step dynamics used by sample()/get_expected_next_state()"
+    )
+
+
+def test_pendulum_explicit_state_queries_do_not_reuse_held_control():
+    """Explicit state queries should recompute control instead of reusing the held one."""
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+
+    adapter = NeuralCLBFPendulum(dt=0.01, noise_level=0.0)
+    current_state = torch.tensor([1.0, 0.5])
+    other_state = torch.tensor([-1.0, -0.5])
+    adapter.reset(initial_state=current_state)
+
+    # Prime the held-control cache using the live state.
+    _ = adapter.get_expected_next_state()
+
+    live_next = adapter.get_expected_next_state()
+    queried_next = adapter.get_expected_next_state(other_state)
+    queried_samples = adapter.sample(other_state, n_samples=3)
+
+    assert queried_samples.shape == (3, 2)
+    assert torch.allclose(
+        queried_samples,
+        queried_next.unsqueeze(0).expand_as(queried_samples),
+    )
+    assert not torch.allclose(live_next, queried_next), (
+        "Explicit state queries should not silently reuse the held control from the live state"
+    )
+
+
+def test_pendulum_held_control_rejects_batched_queries():
+    """Held-control path is only defined for the single live state."""
+    import pytest
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+
+    adapter = NeuralCLBFPendulum(dt=0.01, noise_level=0.0)
+    batched_states = torch.tensor([[1.0, 0.5], [-1.0, -0.5]])
+
+    with pytest.raises(ValueError, match="single-state batch"):
+        adapter._get_control(batched_states, use_hold=True)
+
+
 def test_pendulum_lipschitz_estimation():
     """
     Test that the pendulum adapter dynamically estimates Lipschitz constant.
