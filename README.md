@@ -1,6 +1,6 @@
 # Monitoring neural control certificate functions
 
-This project implements runtime monitoring for neural control systems using certificate functions such as Lyapunov and barrier functions. It focuses on detecting whether the monitored certificate value is decreasing in expectation, with statistical guarantees when the required assumptions hold.
+This project implements runtime monitoring for neural control systems using certificate functions such as Lyapunov and barrier functions. The monitor detects whether the monitored certificate value is decreasing in expectation (i.e. whether it forms a supermartingale). It requires Lipschitz assumptions on the system dynamics and certificate functions, and provides statistical guarantees (confidence $\gt 1-\delta$). Several existing neural control systems (from MIT-REALM) are included as submodules and integrated via adapters providing a common interface for the monitor to run against.
 
 ## Installation
 
@@ -9,7 +9,7 @@ The project uses a shared virtual environment for all submodules.
 ```bash
 # Create and activate virtual environment
 uv venv --python 3.9
-source .venv/bin/activate  # or activate.fish
+source .venv/bin/activate  # adjust for shell
 
 # Install all dependencies (including submodules and core package)
 uv pip install -r requirements.txt
@@ -26,7 +26,16 @@ pytest -s tests/
 
 The monitor can be integrated into any control loop by writing an adapter (see `monitor/adapters/interface.py`). This repository currently includes adapters for `neural_clbf` and `sablas`.
 
+The monitor assigns the following verdicts:
+
+- `T`: Attests that the certificate is **valid** (decreasing). Used by estimator-based monitors when the upper confidence bound is below `0`.
+- `F`: Attests that the certificate is **invalid**, i.e. detected violation / rejected null hypothesis
+- `?`: Inconclusive.
+
+
 ### Estimator-based monitor
+
+This monitor is able to attest validity, but it additionally requires an estimator and a weighting strategy.
 
 ```python
 from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
@@ -35,14 +44,14 @@ from monitor.weighting import OptimalTemporalWeights
 from monitor.monitor import NeuralCertificateMonitor
 
 # 1. Initialize the system and the monitor
-adapter = NeuralCLBFPendulum(dt=0.01)
+adapter = NeuralCLBFPendulum()
 weighting = OptimalTemporalWeights()
 estimator = HistoryEstimator(weighting, delta=0.01)
 monitor = NeuralCertificateMonitor(adapter, estimator)
 
 # 2. Run the control/monitor loop
-for safety, lower, upper, info in monitor.run():
-    print(f"Safety Status: {safety} | CI: [{lower:+.4f}, {upper:+.4f}] | info: {info}")
+for verdict, info in monitor.run():
+    print(verdict, info)
 ```
 
 ### Hypothesis-testing monitor
@@ -53,20 +62,12 @@ This monitor implements a one-sided sequential test based on a betting e-process
 from monitor import HypothesisTestingMonitor
 from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
 
-adapter = NeuralCLBFPendulum(dt=0.001, noise_level=10.0)
+adapter = NeuralCLBFPendulum()
 monitor = HypothesisTestingMonitor(adapter=adapter, delta=0.01)
 
 for verdict, info in monitor.run():
-    print(verdict, info["e_value"])
-    if verdict == "F":
-        break
+    print(verdict, info)
 ```
-
-Verdicts:
-
-- `T`: used by estimator-based monitors when the upper confidence bound is below `0`
-- `F`: detected violation / rejected null hypothesis
-- `?`: inconclusive
 
 
 ## Methodology
@@ -79,7 +80,7 @@ and the monitoring objective is to determine whether
 
 $\mathbb{E}[R_t \mid X_t] \leq 0$
 
-holds along the observed execution.
+holds along the observed execution, i.e. $(R_i)_{i\in\mathbb{N}}$ is a supermartingale.
 
 ### Estimator-based monitors
 

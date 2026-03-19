@@ -1,4 +1,4 @@
-from typing import Any, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from .adapters import DynamicalSystemAdapter
 from .weighting import WeightingStrategy, RecentWeights, OptimalTemporalWeights
 from math import log, sqrt, pi
@@ -8,7 +8,9 @@ import torch
 
 class Estimator(ABC):
     @abstractmethod
-    def __call__(self, adapter: DynamicalSystemAdapter) -> Tuple[Literal["T","F","?"], float, float, Any]:
+    def __call__(
+        self, adapter: DynamicalSystemAdapter
+    ) -> Tuple[Literal["T","F","?"], float, float, Dict[str, Any]]:
         """
         Estimate E[R] for the adapter's current state and return a confidence interval.
 
@@ -25,7 +27,7 @@ class Estimator(ABC):
                       "?" if CI straddles zero (inconclusive)
             - lower: Lower bound of confidence interval for E[R]
             - upper: Upper bound of confidence interval for E[R]
-            - info: Estimator-specific metadata (e.g., number of samples used)
+            - info: Estimator-specific metadata dict
         """
         pass
 
@@ -158,7 +160,8 @@ class SamplingEstimator(Estimator):
                 break
 
         safety = "T" if upper < 0 else "F" if lower > 0 else "?" # type: ignore[possibly-unbound]
-        return safety, lower, upper, rewards.shape[0]            # type: ignore[possibly-unbound]
+        info = {"n_samples": int(rewards.shape[0])}
+        return safety, lower, upper, info                        # type: ignore[possibly-unbound]
 
     def _hoeffding_ci(self, adapter, n):
         reward_bounds = adapter.get_reward_bounds()
@@ -192,5 +195,4 @@ class AnalyticEstimator(Estimator):
         # Degenerate CI: point estimate with zero width
         lower, upper = reward, reward
         safety = "T" if reward < 0 else "F" if reward > 0 else "?"
-        return safety, lower, upper, None
-
+        return safety, lower, upper, {}

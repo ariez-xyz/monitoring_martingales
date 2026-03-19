@@ -99,7 +99,8 @@ def test_ci_coverage():
             drone.reset()
 
         # Get CI from sampling estimator
-        _, lower, upper, n_samples = sampling_estimator(drone)
+        _, lower, upper, info = sampling_estimator(drone)
+        n_samples = info["n_samples"]
         ci_widths.append(upper - lower)
 
         # Get near-exact E[R] from analytic estimator

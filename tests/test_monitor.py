@@ -74,3 +74,6 @@ def test_monitor_stride_default_every_step():
     assert len(results) == 5
     assert estimator.calls == [0, 1, 2, 3, 4]
     assert adapter.step_count == 5
+    assert all(verdict == "?" for verdict, _ in results)
+    assert all(info["ci"] == (0.0, 0.0) for _, info in results)
+    assert [info["step_count"] for _, info in results] == [0, 1, 2, 3, 4]

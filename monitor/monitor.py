@@ -12,11 +12,14 @@ class NeuralCertificateMonitor:
         self.adapter = adapter
         self.estimator = estimator
 
-    def run(self) -> Generator[Tuple[Literal["T","F","?"], float, float, Any], None, None]:
+    def run(self) -> Generator[Tuple[Literal["T","F","?"], Any], None, None]:
         step_idx = 0
         try:
             while not self.adapter.done():
-                yield self.estimator(self.adapter)
+                verdict, lower, upper, info = self.estimator(self.adapter)
+                info = dict(info)
+                info["ci"] = (lower, upper)
+                yield verdict, info
                 self.adapter.step()
                 step_idx += 1
         except KeyboardInterrupt:
@@ -100,7 +103,6 @@ class HypothesisTestingMonitor:
                     yield "F", info
                 else:
                     yield "?", info
-
 
         except KeyboardInterrupt:
             pass
