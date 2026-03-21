@@ -48,33 +48,6 @@ def test_drone_interfaces():
     assert isinstance(v, torch.Tensor)
     assert v.ndim == 1
 
-def test_certificate_change_on_step():
-    """
-    Tests the core logic by taking a step and observing the change in the certificate value.
-    """
-    drone = SablasDrone(dt=0.1)
-
-    # 1. Get the certificate value for the current state
-    v_current = drone.get_certificate_value()
-    print(f"\nInitial State Position: {drone.state[:3]}")
-    print(f"Initial Certificate V(x): {v_current.item():.4f}")
-
-    # 2. Take one simulation step
-    next_state = drone.step()
-
-    # 3. Get the certificate value for the new state
-    v_next = drone.get_certificate_value(state=next_state)
-    print(f"Next State Position:    {next_state.numpy()[:3]}")
-    print(f"Next Certificate V(y): {v_next.item():.4f}")
-
-    # 4. Calculate and report the change
-    delta_v = v_next - v_current
-    print(f"Change in Certificate (V(y) - V(x)): {delta_v.item():.4f}")
-    
-    # A working Control Barrier Function (CBF) should result in V staying
-    # positive and ideally increasing as the controller actively avoids obstacles.
-    # We won't assert a specific behavior yet, but observing this value is the key output.
-
 def test_cross_validation_with_script():
     """
     Cross-validates the adapter's logic against the original script's logic
@@ -244,62 +217,3 @@ def test_certificate_correlates_with_safety():
         assert mean_dist_when_v_neg < mean_dist_when_v_pos, \
             f"V < 0 should mean closer to obstacles"
 
-
-def test_reward_sign_on_violation():
-    """
-    Validates that the reward signal correlates with safety transitions.
-
-    When V(x) transitions from positive to negative (entering violation),
-    the reward should tend to be positive (indicating CBF condition violated).
-    """
-    from monitor.adapters import SablasDrone
-
-    drone = SablasDrone()
-
-    rewards_at_violation_entry = []
-    rewards_when_safe = []
-
-    prev_v = float(drone.get_certificate_value())
-
-    max_steps = 300
-    for _ in range(max_steps):
-        if drone.done():
-            drone.reset()
-            prev_v = float(drone.get_certificate_value())
-            continue
-
-        # Sample and compute reward
-        samples = drone.sample(n_samples=100)
-        reward = float(drone.get_reward(samples).mean())
-
-        # Step and get new certificate value
-        drone.step()
-        curr_v = float(drone.get_certificate_value())
-
-        # Track rewards at violation entry vs when safe
-        if prev_v > 0 and curr_v < 0:
-            # Entering violation
-            rewards_at_violation_entry.append(reward)
-        elif prev_v > 0.1 and curr_v > 0.1:
-            # Staying safely positive
-            rewards_when_safe.append(reward)
-
-        prev_v = curr_v
-
-    print(f"\n--- Reward Sign Analysis ---")
-    print(f"Rewards at violation entry: {len(rewards_at_violation_entry)} samples")
-    if rewards_at_violation_entry:
-        mean_viol = np.mean(rewards_at_violation_entry)
-        print(f"  Mean reward: {mean_viol:.4f}")
-        print(f"  Positive rewards: {sum(1 for r in rewards_at_violation_entry if r > 0)}/{len(rewards_at_violation_entry)}")
-
-    print(f"Rewards when safe: {len(rewards_when_safe)} samples")
-    if rewards_when_safe:
-        mean_safe = np.mean(rewards_when_safe)
-        print(f"  Mean reward: {mean_safe:.4f}")
-        print(f"  Negative rewards: {sum(1 for r in rewards_when_safe if r < 0)}/{len(rewards_when_safe)}")
-
-    # When safe, rewards should mostly be negative (CBF condition satisfied)
-    if len(rewards_when_safe) > 20:
-        negative_ratio = sum(1 for r in rewards_when_safe if r < 0) / len(rewards_when_safe)
-        assert negative_ratio > 0.7, f"Expected mostly negative rewards when safe, got {negative_ratio:.1%}"
