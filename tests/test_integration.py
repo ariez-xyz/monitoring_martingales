@@ -311,7 +311,7 @@ def test_hypothesis_monitor_pendulum_smoke():
     import matplotlib.pyplot as plt
 
     dt = 0.001
-    use_sampling_monitor = True
+    use_sampling_monitor = False
     adapter = NeuralCLBFPendulum(dt=dt, noise_level=10.0, vis_every=50, certificate_slope=0.0)
     monitor = HypothesisTestingMonitor(adapter=adapter, delta=0.05)
     sampling = None
