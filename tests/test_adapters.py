@@ -199,6 +199,7 @@ def test_pendulum_seeded_bounds_cover_observed_step_drift():
     |V(x_{t+1}) - V(x_t)| <= get_lipschitz_constant().
     """
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+    from random import random
 
     seeded_bounds = {
         (0.001, 0.0): 0.20,
@@ -212,20 +213,20 @@ def test_pendulum_seeded_bounds_cover_observed_step_drift():
     }
     tol = 1e-6
 
-    for i, ((dt, noise_level), expected_bound) in enumerate(seeded_bounds.items()):
-        np.random.seed(1000 + i)
-        torch.manual_seed(1000 + i)
+    for (dt, noise_level), expected_bound in seeded_bounds.items():
         adapter = NeuralCLBFPendulum(dt=dt, noise_level=noise_level)
         gamma = adapter.get_lipschitz_constant()
         assert abs(gamma - expected_bound) < tol, (
             f"Unexpected cached bound for dt={dt}, noise={noise_level}: {gamma} vs {expected_bound}"
         )
 
-        observed_max = 0.0
         # Keep runtime small while still sampling multiple episodes/states.
-        for _ in range(3):
-            adapter.reset()
-            for _ in range(20000):
+        for _ in range(50):
+            observed_max = 0.0
+            seed = int(random() * 999999)
+            adapter.reset(seed=seed)
+
+            for _ in range(10):
                 v_cur = float(adapter.get_certificate_value())
                 adapter.step()
                 v_next = float(adapter.get_certificate_value())
@@ -235,10 +236,11 @@ def test_pendulum_seeded_bounds_cover_observed_step_drift():
                 if adapter.done():
                     break
 
-        assert observed_max <= gamma + tol, (
-            f"Observed step drift exceeds cached bound for dt={dt}, noise={noise_level}: "
-            f"observed_max={observed_max:.6f}, gamma={gamma:.6f}"
-        )
+            assert observed_max <= gamma + tol, (
+                f"Observed step drift exceeds cached bound for dt={dt}, noise={noise_level}: "
+                f"observed_max={observed_max:.6f}, gamma={gamma:.6f}"
+                f"seed={seed}"
+            )
 
 
 def test_sablas_lipschitz_constant():
