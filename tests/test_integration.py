@@ -179,7 +179,7 @@ def test_history_estimator_with_lookahead():
     for _ in range(200):
         adapter.step()
 
-    print(f"  History length: {len(adapter.state_history)} states")
+    print(f"  History length: {len(adapter.get_state_history())} states")
     print()
 
     # Get optimal m for reference

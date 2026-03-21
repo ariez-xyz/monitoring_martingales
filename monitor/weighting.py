@@ -28,7 +28,7 @@ class UniformWeights(WeightingStrategy):
     """Uniform weights over [0, t]: w_i = 1/(t+1) for i <= t, 0 otherwise."""
 
     def __call__(self, adapter: DynamicalSystemAdapter, t: int) -> List[float]:
-        history_len = len(adapter.state_history)
+        history_len = len(adapter.get_state_history())
         weights = [0.0] * history_len
         for i in range(t + 1):
             weights[i] = 1.0 / (t + 1)
@@ -42,7 +42,7 @@ class RecentWeights(WeightingStrategy):
         self.k = k
 
     def __call__(self, adapter: DynamicalSystemAdapter, t: int) -> List[float]:
-        history_len = len(adapter.state_history)
+        history_len = len(adapter.get_state_history())
         k = min(self.k, t + 1)
         start_idx = t - k + 1
 
@@ -118,7 +118,7 @@ class OptimalTemporalWeights(WeightingStrategy):
             Non-zero weights are centered around t, using lookahead if available.
         """
         # Get available history length from adapter
-        history_len = len(adapter.state_history)
+        history_len = len(adapter.get_state_history())
         T = history_len - 1  # Latest available index
 
         # Compute optimal m

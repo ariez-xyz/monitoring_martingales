@@ -142,7 +142,7 @@ def test_weighting_with_lookahead():
     for _ in range(100):
         adapter.step()
 
-    history_len = len(adapter.state_history)  # 101 (initial + 100 steps)
+    history_len = len(adapter.get_state_history())  # 101 (initial + 100 steps)
     T = history_len - 1  # 100, latest index
 
     print(f"\n  History length: {history_len} states (indices 0-{T})")

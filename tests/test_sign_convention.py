@@ -39,7 +39,7 @@ def test_sablas_reward_sign_convention():
     """Sablas uses CBF residual: (h(x) - h(y)) - alpha(h(x)), so non-positive means safe."""
     adapter = SablasDrone(dt=0.1, noise_level=0.1)
 
-    cur_state = adapter.state_history[-1].clone()
+    cur_state = adapter.get_state_history()[-1].clone()
     cur_v = adapter.get_certificate_value(cur_state)
     next_states = adapter.sample(cur_state, n_samples=32)
     next_v = adapter.get_certificate_value(next_states)
@@ -55,4 +55,3 @@ def test_sablas_reward_sign_convention():
         "Sablas reward must equal CBF residual (h(x)-h(y)) - alpha(h(x))",
     )
     assert ((reward <= 0) == (residual <= 0)).all(), "Sign convention mismatch for sablas"
-

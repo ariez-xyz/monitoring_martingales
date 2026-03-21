@@ -80,7 +80,7 @@ class HistoryEstimator(Estimator):
         return int(self.delay)
 
     def __call__(self, adapter):
-        history = adapter.state_history
+        history = adapter.get_state_history()
         T = len(history) - 1 # index of last step
         delay = self._get_delay(adapter)
         target = T - delay

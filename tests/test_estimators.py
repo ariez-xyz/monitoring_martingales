@@ -380,7 +380,7 @@ def test_delayed_history_estimator():
     for _ in range(100):
         adapter.step()
 
-    T = len(adapter.state_history) - 1  # 100
+    T = len(adapter.get_state_history()) - 1  # 100
 
     # Test 1: No delay (default behavior)
     estimator_no_delay = HistoryEstimator(weighting=RecentWeights(k=10), delay=0)
