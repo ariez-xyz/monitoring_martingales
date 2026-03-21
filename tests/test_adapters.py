@@ -60,6 +60,23 @@ def test_neural_clbf_pendulum_adapter():
     print(f"  Adapter works correctly!")
 
 
+def test_pendulum_reset_seed_is_deterministic():
+    """Resetting with the same seed should reproduce the same initial state."""
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+
+    adapter = NeuralCLBFPendulum(dt=0.01, noise_level=0.0)
+
+    adapter.reset(seed=123)
+    first = adapter.state.clone()
+    adapter.reset(seed=123)
+    second = adapter.state.clone()
+    adapter.reset(seed=456)
+    third = adapter.state.clone()
+
+    assert torch.allclose(first, second)
+    assert not torch.allclose(first, third)
+
+
 def test_pendulum_flip_fault_affects_sampling_and_expected_next_state():
     """Flip fault mode should be reflected by sample() and get_expected_next_state()."""
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
@@ -254,6 +271,36 @@ def test_sablas_lipschitz_constant():
     print(f"  dt=0.05: update_control_every = {adapter_fine.update_control_every}")
 
     print("  Sablas Lipschitz constant works correctly!")
+
+
+def test_sablas_reset_seed_is_deterministic_and_clear():
+    """Sablas reset(seed=...) should be reproducible and maintain clearance."""
+    from monitor.adapters.sablas import SablasDrone
+
+    adapter = SablasDrone(dt=0.1, noise_level=0.0)
+
+    adapter.reset(seed=123)
+    state_a = adapter.state.copy()
+    goal_a = adapter.goal.copy()
+    obstacle_a = adapter.obstacle.copy()
+
+    adapter.reset(seed=123)
+    state_b = adapter.state.copy()
+    goal_b = adapter.goal.copy()
+    obstacle_b = adapter.obstacle.copy()
+
+    adapter.reset(seed=456)
+    state_c = adapter.state.copy()
+
+    assert np.allclose(state_a, state_b)
+    assert np.allclose(goal_a, goal_b)
+    assert np.allclose(obstacle_a, obstacle_b)
+    assert not np.allclose(state_a, state_c)
+
+    state_clearance = np.min(np.linalg.norm(adapter.env.obstacle - adapter.state[:3], axis=1))
+    goal_clearance = np.min(np.linalg.norm(adapter.env.obstacle - adapter.goal[:3], axis=1))
+    assert state_clearance >= adapter.env.safe_dist
+    assert goal_clearance >= adapter.env.safe_dist
 
 
 def get_min_obstacle_distance(state: np.ndarray, obstacles: np.ndarray) -> float:

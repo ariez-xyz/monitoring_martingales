@@ -18,6 +18,11 @@ class DummyAdapter(DynamicalSystemAdapter):
         self.state_history = [torch.tensor([0.0])]
         self.state = self.state_history[-1]
 
+    def reset(self, seed: Optional[int] = None):
+        self.step_count = 0
+        self.state_history = [torch.tensor([0.0])]
+        self.state = self.state_history[-1]
+
     def done(self) -> bool:
         return self.step_count >= self.max_steps
 

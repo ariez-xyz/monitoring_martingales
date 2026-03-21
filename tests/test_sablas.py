@@ -72,6 +72,7 @@ def test_cross_validation_with_script():
     torch.manual_seed(seed)
     np.random.seed(seed)
     adapter = SablasDrone(dt=dt)
+    adapter.reset(seed=seed)
     adapter_state_0 = adapter.state.copy()
     adapter_state_1 = adapter.step().numpy()
 
@@ -86,7 +87,7 @@ def test_cross_validation_with_script():
     controller.eval()
     
     # Reset and get initial state
-    script_state_0, obstacle, goal = env.reset()
+    script_state_0, obstacle, goal = env.reset(seed=seed)
     state_error = torch.zeros(1, 8, dtype=torch.float32)
 
     # Step logic from script

@@ -83,14 +83,20 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         if self._monitor_reject_step is None:
             self._monitor_reject_step = int(step_index)
 
-    def reset(self, initial_state: Optional[torch.Tensor] = None):
+    def reset(self, seed: Optional[int] = None, initial_state: Optional[torch.Tensor] = None):
         """Reset the simulation."""
         if initial_state is not None:
             self.state = initial_state.clone()
         else:
             # Random initial state within bounds
             upper, lower = self.dynamics.state_limits
-            self.state = lower + torch.rand(self.dynamics.n_dims) * (upper - lower)
+            if seed is not None:
+                g = torch.Generator()
+                g.manual_seed(seed)
+                rand = torch.rand(self.dynamics.n_dims, generator=g)
+            else:
+                rand = torch.rand(self.dynamics.n_dims)
+            self.state = lower + rand * (upper - lower)
 
         self.state_history = [self.state.clone()]
         self.control_history = []  # Nominal control history (for visualization)
@@ -291,12 +297,12 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             self._lipschitz_cache[cache_key] = preseed[cache_key]
 
         if cache_key not in self._lipschitz_cache:
-            self._lipschitz_cache[cache_key] = self._estimate_lipschitz_constant()
+            self._lipschitz_cache[cache_key] = self._estimate_lipschitz_constant() # type: ignore
         return self._lipschitz_cache[cache_key]
 
     def _estimate_lipschitz_constant(
         self,
-        n_episodes: int = 30,
+        n_episodes: int = 5,
         max_steps: int = 20000,
         percentile: float = 99.999,
         return_diffs: bool = False,
@@ -369,7 +375,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
                 self.state = next_state_rollout
                 self._step_count += 1
 
-                if self.dynamics.goal_mask(self.state.unsqueeze(0)).item():
+                if self.done():
                     break
 
         # Restore state
@@ -380,12 +386,6 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self.clf_history = saved_clf
         self._step_count = saved_step
         self.is_done = saved_done
-
-        if not step_bound_samples:
-            gamma = 0.1  # Fallback
-            if return_diffs:
-                return gamma, step_bound_samples
-            return gamma
 
         gamma = float(np.percentile(step_bound_samples, percentile))
         gamma = max(gamma, 1e-6)  # Avoid zero

@@ -85,12 +85,14 @@ class SablasDrone(DynamicalSystemAdapter):
         self._alpha = value
         self._reward_bounds_cache = None
 
-    def reset(self):
+    def reset(self, seed: Optional[int] = None):
         """Resets the environment and the adapter's internal state."""
-        self.state, self.obstacle, self.goal = self.env.reset()
+        self.state, self.obstacle, self.goal = self.env.reset(seed=seed)
         self.state_error = torch.zeros(1, self.get_state_dim(), dtype=torch.float32)
         self.state_history = [torch.from_numpy(self.state).float()]
         self._cached_control = None
+        self.is_done = False
+        self._step_count = 0
 
     def _compute_control_input(self, state: np.ndarray) -> np.ndarray:
         """Compute a fresh control input for a given state."""

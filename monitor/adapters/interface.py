@@ -70,6 +70,16 @@ class DynamicalSystemAdapter(ABC):
         pass
 
     @abstractmethod
+    def reset(self, seed: Optional[int] = None):
+        """
+        Reset the adapter to a fresh rollout state.
+
+        Args:
+            seed: Optional seed for deterministic reset behavior.
+        """
+        pass
+
+    @abstractmethod
     def get_state_history(self) -> torch.Tensor:
         """
         Return the history of states.
