@@ -1,4 +1,4 @@
-from typing import Generator, Tuple, Literal, Any, List
+from typing import Generator, Tuple, Literal, Any, List, Dict
 from .adapters import DynamicalSystemAdapter
 from .estimators import Estimator
 
@@ -12,7 +12,7 @@ class NeuralCertificateMonitor:
         self.adapter = adapter
         self.estimator = estimator
 
-    def run(self) -> Generator[Tuple[Literal["T","F","?"], Any], None, None]:
+    def run(self) -> Generator[Tuple[Literal["T","F","?"], Dict[Any, Any]], None, None]:
         step_idx = 0
         try:
             while not self.adapter.done():
