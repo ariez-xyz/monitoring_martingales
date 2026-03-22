@@ -83,7 +83,7 @@ class OptimalTemporalWeights(WeightingStrategy):
     def compute_optimal_m(self, adapter: DynamicalSystemAdapter) -> int:
         """Compute optimal m based on adapter parameters."""
         # Get parameters from adapter
-        gamma = adapter.get_lipschitz_constant()
+        gamma = adapter.get_drift_bound()
         reward_lo, reward_hi = adapter.get_reward_bounds()
 
         # Sub-Gaussian parameter for bounded rewards

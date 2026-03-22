@@ -116,7 +116,7 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
     def distance(self, state1: torch.Tensor, state2: torch.Tensor) -> float:
         return float(torch.abs(state1[0] - state2[0]))
 
-    def get_lipschitz_constant(self) -> float:
+    def get_drift_bound(self) -> float:
         return abs(self.mean + self.clamp_at_sigma * self.sigma)
 
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -128,4 +128,3 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
 
 def check_close(a: torch.Tensor, b: torch.Tensor, msg: str) -> None:
     assert torch.allclose(a, b, atol=1e-6, rtol=1e-6), msg
-

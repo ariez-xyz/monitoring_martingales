@@ -145,7 +145,7 @@ In plain terms:
 
 Several monitor components rely on Lipschitz-style constants or one-step drift bounds. In the current codebase these should be read as practical estimates used for monitoring, not as formal analytic constants derived from the underlying system.
 
-- In the pendulum adapter, `get_lipschitz_constant()` in [monitor/adapters/neural_clbf_pendulum.py](/Users/ariez/Projects/neural-control-monitoring/monitor/adapters/neural_clbf_pendulum.py) returns a per-step drift bound proxy.
+- In the pendulum adapter, `get_drift_bound()` in [monitor/adapters/neural_clbf_pendulum.py](/Users/ariez/Projects/neural-control-monitoring/monitor/adapters/neural_clbf_pendulum.py) returns a per-step drift bound proxy.
 - For common `(dt, noise_level)` settings, the adapter uses seeded conservative values.
 - Otherwise it estimates the quantity empirically by rolling out trajectories, evaluating one-step certificate changes, and taking a high percentile of the observed absolute drifts.
 - This value is then cached and reused by the monitor.

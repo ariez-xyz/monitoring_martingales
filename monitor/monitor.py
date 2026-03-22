@@ -45,7 +45,7 @@ class HypothesisTestingMonitor:
 
     def eta(self, n) -> float:
         # Note: We assume adapter.dt never varies, so B_n = B for all n
-        B = self.adapter.get_lipschitz_constant() 
+        B = self.adapter.get_drift_bound() 
         return min(1/B, max(0, self.S(n-1) / (self.V(n-1) + B**2)))
 
     def S(self, n) -> float:

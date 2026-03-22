@@ -112,7 +112,7 @@ def test_sablas_control_period():
 
     # Test fixed constant
     adapter = SablasDrone()
-    gamma = adapter.get_lipschitz_constant()
+    gamma = adapter.get_drift_bound()
 
     assert adapter.control_period == 0.1
     assert adapter.update_control_every == 1

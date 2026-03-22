@@ -253,8 +253,13 @@ class SablasDrone(DynamicalSystemAdapter):
         """Euclidean distance on full state."""
         return float(torch.linalg.norm(state1 - state2))
 
-    def get_lipschitz_constant(self) -> float:
-        """Returns the Lipschitz constant for expected rewards."""
+    def get_drift_bound(self) -> float:
+        """Returns a provisional drift-bound proxy for SABLAS.
+
+        TODO: revisit this quantity once the SABLAS adapter is brought back in
+        line with the current monitoring theory. For now this preserves the
+        previous behavior under a less misleading name.
+        """
         return self.lipschitz_constant
 
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:

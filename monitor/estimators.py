@@ -105,7 +105,7 @@ class HistoryEstimator(Estimator):
 
         # Discretization error: DE = γ * Σ w_i * d(x_target, x_i)
         # Note: we use the TARGET state, not the latest state
-        gamma = adapter.get_lipschitz_constant()
+        gamma = adapter.get_drift_bound()
 
         dist = lambda i, j: abs(i-j)
         # To do spatial distance instead: something like

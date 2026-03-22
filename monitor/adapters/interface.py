@@ -125,24 +125,14 @@ class DynamicalSystemAdapter(ABC):
         """
         pass
 
-    def get_lipschitz_constant(self) -> float:
+    def get_drift_bound(self) -> float:
         """
-        Returns the temporal Lipschitz constant γ for expected rewards.
-
-        For temporal weighting, γ represents reward change per timestep:
-            γ = |ΔR| / k  where k is the number of timesteps
-
-        This scales with dt: smaller timesteps → smaller γ → larger optimal m*.
-        Used by OptimalTemporalWeights for: m* = (c1/γ)^(2/3)
-
-        Implementations may either:
-        - Return a pre-computed constant (if dt is fixed, e.g. trained controllers)
-        - Estimate dynamically and cache by dt (if dt is configurable)
+        Returns a bound on the magnitude of the one-step reward or drift.
 
         Raises:
-            NotImplementedError: If Lipschitz constant is not available.
+            NotImplementedError: If a drift bound is not available.
         """
-        raise NotImplementedError("Lipschitz constant not available for this adapter")
+        raise NotImplementedError("Drift bound not available for this adapter")
 
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """

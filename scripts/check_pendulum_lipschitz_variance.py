@@ -2,8 +2,8 @@
 """Measure variance of pendulum Lipschitz estimates across repeated runs.
 
 This script reports:
-1) Same-adapter repeated calls to get_lipschitz_constant() (cache behavior)
-2) Fresh-adapter calls to get_lipschitz_constant() (estimation variance)
+1) Same-adapter repeated calls to get_drift_bound() (cache behavior)
+2) Fresh-adapter calls to get_drift_bound() (estimation variance)
 
 By default it uses the public adapter API. An optional fast mode calls the
 private estimator directly with configurable rollout settings.
@@ -48,7 +48,7 @@ def summarize(values: List[float], label: str) -> None:
 
 
 def call_public_gamma(adapter: NeuralCLBFPendulum) -> float:
-    return float(adapter.get_lipschitz_constant())
+    return float(adapter.get_drift_bound())
 
 
 def call_private_gamma_with_diffs(
@@ -57,7 +57,7 @@ def call_private_gamma_with_diffs(
     max_steps: int,
     percentile: float,
 ) -> Tuple[float, List[float]]:
-    gamma, diffs = adapter._estimate_lipschitz_constant(
+    gamma, diffs = adapter._estimate_drift_bound(
         n_episodes=n_episodes,
         max_steps=max_steps,
         percentile=percentile,
@@ -94,7 +94,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    mode = "private estimator" if args.fast_private else "public get_lipschitz_constant()"
+    mode = "private estimator" if args.fast_private else "public get_drift_bound()"
     print("=" * 80)
     print("Pendulum Lipschitz Variance Check")
     print("=" * 80)

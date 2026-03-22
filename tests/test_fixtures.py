@@ -51,7 +51,7 @@ def test_normal_increment_adapter_0sigma_as_expected():
     while not adapter.done():
         adapter.step()
     assert adapter.get_reward_bounds() == (-1, -1)
-    assert adapter.get_lipschitz_constant() == 1
+    assert adapter.get_drift_bound() == 1
     assert len(adapter.get_state_history()) == 201
     assert float(adapter.get_state_history()[0]) == 200
     assert float(adapter.get_state_history()[50]) == 150

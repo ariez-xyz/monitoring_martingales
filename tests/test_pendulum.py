@@ -100,7 +100,7 @@ def test_pendulum_drift_bound_orders_widely_separated_timesteps():
     # Test bound lookup works
     adapter = NeuralCLBFPendulum(dt=0.01)
     start = time.time()
-    gamma1 = adapter.get_lipschitz_constant()
+    gamma1 = adapter.get_drift_bound()
     time1 = time.time() - start
 
     assert gamma1 > 0, f"gamma should be positive, got {gamma1}"
@@ -109,7 +109,7 @@ def test_pendulum_drift_bound_orders_widely_separated_timesteps():
 
     # Test caching - second call should be instant
     start = time.time()
-    gamma1_cached = adapter.get_lipschitz_constant()
+    gamma1_cached = adapter.get_drift_bound()
     time_cached = time.time() - start
 
     assert gamma1_cached == gamma1, "Cached value should match"
@@ -118,10 +118,10 @@ def test_pendulum_drift_bound_orders_widely_separated_timesteps():
 
     # Test widely separated dt values to avoid flakiness from estimation noise
     adapter_small_dt = NeuralCLBFPendulum(dt=0.001)
-    gamma_small = adapter_small_dt.get_lipschitz_constant()
+    gamma_small = adapter_small_dt.get_drift_bound()
 
     adapter_large_dt = NeuralCLBFPendulum(dt=0.1)
-    gamma_large = adapter_large_dt.get_lipschitz_constant()
+    gamma_large = adapter_large_dt.get_drift_bound()
 
     print(f"  dt=0.001: gamma = {gamma_small:.4f}")
     print(f"  dt=0.1:  gamma = {gamma_large:.4f}")
@@ -139,7 +139,7 @@ def test_pendulum_seeded_bounds_cover_observed_step_drift():
 
     For each seeded (dt, noise_level) configuration, this test runs short
     rollouts via the adapter API and checks:
-    |V(x_{t+1}) - V(x_t)| <= get_lipschitz_constant().
+    |V(x_{t+1}) - V(x_t)| <= get_drift_bound().
     """
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
     from random import random
@@ -158,7 +158,7 @@ def test_pendulum_seeded_bounds_cover_observed_step_drift():
 
     for (dt, noise_level), expected_bound in seeded_bounds.items():
         adapter = NeuralCLBFPendulum(dt=dt, noise_level=noise_level)
-        gamma = adapter.get_lipschitz_constant()
+        gamma = adapter.get_drift_bound()
         assert abs(gamma - expected_bound) < tol, (
             f"Unexpected cached bound for dt={dt}, noise={noise_level}: {gamma} vs {expected_bound}"
         )
@@ -205,5 +205,4 @@ def test_pendulum_reward_sign_convention():
         "Pendulum reward must equal CLF residual V(y) - V(x)",
     )
     assert ((reward <= 0) == (residual <= 0)).all(), "Sign convention mismatch for pendulum"
-
 

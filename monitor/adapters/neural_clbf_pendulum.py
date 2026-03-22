@@ -269,7 +269,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         """Euclidean distance on full state."""
         return float(torch.linalg.norm(state1 - state2))
 
-    def get_lipschitz_constant(self) -> float:
+    def get_drift_bound(self) -> float:
         """Returns an empirical per-step drift bound proxy for current config.
 
         For the test-based monitor we use this as a proxy for B_k at fixed step
@@ -297,10 +297,10 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             self._lipschitz_cache[cache_key] = preseed[cache_key]
 
         if cache_key not in self._lipschitz_cache:
-            self._lipschitz_cache[cache_key] = self._estimate_lipschitz_constant() # type: ignore
+            self._lipschitz_cache[cache_key] = self._estimate_drift_bound() # type: ignore
         return self._lipschitz_cache[cache_key]
 
-    def _estimate_lipschitz_constant(
+    def _estimate_drift_bound(
         self,
         n_episodes: int = 5,
         max_steps: int = 20000,
