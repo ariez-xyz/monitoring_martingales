@@ -1,4 +1,4 @@
-"""Reusable test fixtures for fast, deterministic estimator tests."""
+"""Reusable test fixtures for fast, deterministic monitor and estimator tests."""
 
 from typing import List, Optional, Tuple
 import torch
@@ -125,4 +125,7 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         if state.dim() == 1:
             state = state.unsqueeze(0)
         return state[0] + float(self.mean)
+
+def check_close(a: torch.Tensor, b: torch.Tensor, msg: str) -> None:
+    assert torch.allclose(a, b, atol=1e-6, rtol=1e-6), msg
 

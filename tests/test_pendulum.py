@@ -1,6 +1,8 @@
 """Tests for the neural_clbf pendulum adapter."""
 import torch
 
+from tests.fixtures import check_close
+
 def test_pendulum_reset_seed_is_deterministic():
     """Resetting with the same seed should reproduce the same initial state."""
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
@@ -161,7 +163,7 @@ def test_pendulum_seeded_bounds_cover_observed_step_drift():
             f"Unexpected cached bound for dt={dt}, noise={noise_level}: {gamma} vs {expected_bound}"
         )
 
-        # Keep runtime small while still sampling multiple episodes/states.
+        # 50 resets with 10 steps to keep runtime short.
         for _ in range(50):
             observed_max = 0.0
             seed = int(random() * 999999)
@@ -182,3 +184,26 @@ def test_pendulum_seeded_bounds_cover_observed_step_drift():
                 f"observed_max={observed_max:.6f}, gamma={gamma:.6f}"
                 f"seed={seed}"
             )
+
+def test_pendulum_reward_sign_convention():
+    """Pendulum uses CLF residual: V(y) - V(x), so negative means safe."""
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+    adapter = NeuralCLBFPendulum(dt=0.01, noise_level=0.0)
+
+    cur_state = adapter.state.clone()
+    cur_v = adapter.get_certificate_value(cur_state)
+    next_states = adapter.sample(cur_state, n_samples=32)
+    next_v = adapter.get_certificate_value(next_states)
+
+    # Independent residual formula from CLF condition.
+    residual = next_v - cur_v
+    reward = adapter.get_reward(next_states, cur_state)
+
+    check_close(
+        reward,
+        residual,
+        "Pendulum reward must equal CLF residual V(y) - V(x)",
+    )
+    assert ((reward <= 0) == (residual <= 0)).all(), "Sign convention mismatch for pendulum"
+
+

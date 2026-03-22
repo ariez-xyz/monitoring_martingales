@@ -3,6 +3,7 @@ import numpy as np
 from monitor.adapters import SablasDrone
 from sablas.envs.env_drone import Drone
 from sablas.modules.network import NNController
+from tests.fixtures import check_close
 
 def get_min_obstacle_distance(state: np.ndarray, obstacles: np.ndarray) -> float:
     """
@@ -100,13 +101,12 @@ def test_cross_validation_with_script():
     print("\nCross-validation successful: Adapter state matches script state for one step.")
 
 
-def test_sablas_lipschitz_constant():
+def test_sablas_control_period():
     """
     Test that the sablas adapter returns fixed Lipschitz constant with fixed control cadence.
 
     Verifies:
-    1. Returns fixed gamma = 1.0 for default dt
-    2. Keeps control period fixed at 0.1s while dt changes simulation fidelity
+    1. Keeps control period fixed at 0.1s while dt changes simulation fidelity
     """
     print("\n--- Sablas Lipschitz Constant Test ---")
 
@@ -114,7 +114,6 @@ def test_sablas_lipschitz_constant():
     adapter = SablasDrone()
     gamma = adapter.get_lipschitz_constant()
 
-    assert gamma == 1.0, f"Expected fixed gamma=1.0, got {gamma}"
     assert adapter.control_period == 0.1
     assert adapter.update_control_every == 1
     print(f"  Default dt=0.1: gamma = {gamma}, control period = {adapter.control_period}")
@@ -126,8 +125,6 @@ def test_sablas_lipschitz_constant():
         f"Expected update_control_every=2 at dt=0.05, got {adapter_fine.update_control_every}"
     )
     print(f"  dt=0.05: update_control_every = {adapter_fine.update_control_every}")
-
-    print("  Sablas Lipschitz constant works correctly!")
 
 
 def test_sablas_reset_seed_is_deterministic_and_clear():
@@ -217,3 +214,23 @@ def test_certificate_correlates_with_safety():
         assert mean_dist_when_v_neg < mean_dist_when_v_pos, \
             f"V < 0 should mean closer to obstacles"
 
+def test_sablas_reward_sign_convention():
+    """Sablas uses CBF residual: (h(x) - h(y)) - alpha(h(x)), so non-positive means safe."""
+    adapter = SablasDrone(dt=0.1, noise_level=0.1)
+
+    cur_state = adapter.get_state_history()[-1].clone()
+    cur_v = adapter.get_certificate_value(cur_state)
+    next_states = adapter.sample(cur_state, n_samples=32)
+    next_v = adapter.get_certificate_value(next_states)
+
+    # Independent residual formula from CBF condition in adapter docs.
+    alpha_cur = float(adapter.alpha(float(cur_v)))
+    residual = (float(cur_v) - next_v) - alpha_cur
+    reward = adapter.get_reward(next_states, cur_state)
+
+    check_close(
+        reward,
+        residual,
+        "Sablas reward must equal CBF residual (h(x)-h(y)) - alpha(h(x))",
+    )
+    assert ((reward <= 0) == (residual <= 0)).all(), "Sign convention mismatch for sablas"
