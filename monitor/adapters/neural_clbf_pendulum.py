@@ -309,6 +309,9 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             self._drift_bound_cache[cache_key] = self._estimate_drift_bound() # type: ignore
         return self._drift_bound_cache[cache_key]
 
+    def get_transition_wasserstein_lipschitz(self) -> float:
+        raise NotImplementedError("rho is not implemented yet for NeuralCLBFPendulum")
+
     def _estimate_drift_bound(
         self,
         n_episodes: int = 5,

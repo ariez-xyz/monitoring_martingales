@@ -36,6 +36,7 @@ def test_normal_increment_adapter_respects_reward_bounds_and_expectation():
 
     expected_next = adapter.get_expected_next_state(cur_state)
     assert torch.allclose(expected_next, cur_state + adapter.mean)
+    assert adapter.get_transition_wasserstein_lipschitz() == 1.0
 
     with pytest.raises(ValueError, match="sigma must be nonnegative"):
         NormalIncrementAdapter(mean=0.0, sigma=-1.0, initial_value=1.0)

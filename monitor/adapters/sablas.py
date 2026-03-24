@@ -270,6 +270,9 @@ class SablasDrone(DynamicalSystemAdapter):
         """
         return self.lipschitz_constant
 
+    def get_transition_wasserstein_lipschitz(self) -> float:
+        raise NotImplementedError("rho is not implemented yet for SablasDrone")
+
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Computes E[Y] analytically for sablas drone dynamics.

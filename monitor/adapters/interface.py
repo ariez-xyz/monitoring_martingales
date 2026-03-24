@@ -144,6 +144,15 @@ class DynamicalSystemAdapter(ABC):
         """
         raise NotImplementedError("Drift bound not available for this adapter")
 
+    def get_transition_wasserstein_lipschitz(self) -> float:
+        """
+        Returns a Lipschitz bound rho for the one-step transition kernel in W1.
+
+        Raises:
+            NotImplementedError: If rho is not available for this adapter.
+        """
+        raise NotImplementedError("Transition-kernel Lipschitz bound rho not available for this adapter")
+
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Computes E[Y] where Y ~ P(x) is the next state analytically.

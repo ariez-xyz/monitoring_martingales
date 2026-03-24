@@ -124,6 +124,11 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
     def get_drift_bound(self) -> float:
         return abs(self.mean + self.clamp_at_sigma * self.sigma)
 
+    def get_transition_wasserstein_lipschitz(self) -> float:
+        # Under additive state-independent noise, P(x) is a translated copy of
+        # the same increment law, so W1(P(x), P(x')) = |x - x'|.
+        return 1.0
+
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         if state is None:
             state = self.state
