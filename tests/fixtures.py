@@ -122,7 +122,8 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         return float(torch.abs(state1[0] - state2[0]))
 
     def get_drift_bound(self) -> float:
-        return abs(self.mean + self.clamp_at_sigma * self.sigma)
+        lo, hi = self.get_reward_bounds()
+        return max(abs(lo), abs(hi))
 
     def get_transition_wasserstein_lipschitz(self) -> float:
         # Under additive state-independent noise, P(x) is a translated copy of
