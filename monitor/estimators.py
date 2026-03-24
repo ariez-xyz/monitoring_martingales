@@ -128,7 +128,15 @@ class HistoryEstimator(Estimator):
         upper = weighted_mean + DE + SE
 
         safety = "T" if upper < 0 else "F" if lower > 0 else "?"
-        info = { "T": T, "target": target, "delay": delay, "DE": DE, "SE": SE, "V_t": V_t }
+        info = { 
+            "T": T,
+            "target": target,
+            "delay": delay,
+            "center": weighted_mean,
+            "DE": DE,
+            "SE": SE,
+            "V_t": V_t 
+        }
         return safety, lower, upper, info
 
 
