@@ -69,7 +69,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         # Temporal Lipschitz constant γ = |ΔR|/k (reward change per timestep)
         # Cached by (dt, noise_level) since both affect reward variation.
         # Used by OptimalTemporalWeights for m* = (c1/γ)^(2/3)
-        self._lipschitz_cache: Dict[Tuple[float, float], float] = {}
+        self._drift_bound_cache: Dict[Tuple[float, float], float] = {}
 
         self.certificate_slope = certificate_slope
         self.flip_inputs_state = False
@@ -293,12 +293,12 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             (0.01, 1.0): 2.00,
             (0.01, 10.0): 2.50,
         }
-        if cache_key in preseed and cache_key not in self._lipschitz_cache:
-            self._lipschitz_cache[cache_key] = preseed[cache_key]
+        if cache_key in preseed and cache_key not in self._drift_bound_cache:
+            self._drift_bound_cache[cache_key] = preseed[cache_key]
 
-        if cache_key not in self._lipschitz_cache:
-            self._lipschitz_cache[cache_key] = self._estimate_drift_bound() # type: ignore
-        return self._lipschitz_cache[cache_key]
+        if cache_key not in self._drift_bound_cache:
+            self._drift_bound_cache[cache_key] = self._estimate_drift_bound() # type: ignore
+        return self._drift_bound_cache[cache_key]
 
     def _estimate_drift_bound(
         self,
