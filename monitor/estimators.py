@@ -1,6 +1,6 @@
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, Literal, Tuple
 from .adapters import DynamicalSystemAdapter
-from .weighting import WeightingStrategy, RecentWeights, OptimalTemporalWeights
+from .weighting import OptimalTemporalWeights, UniformWeights, WeightingStrategy
 from math import log, sqrt, pi
 from abc import ABC, abstractmethod
 import torch
@@ -34,108 +34,78 @@ class Estimator(ABC):
 
 class HistoryEstimator(Estimator):
     """
-    Estimates E[R] using only the observed trajectory history (no sampling).
+    Estimates the local expected one-step drift from the observed drift history.
 
-    Uses the Lipschitz assumption to bound discretization error and
-    concentration inequalities for the statistical error.
+    This implements the centered sliding-window logic for uniform windows of 
+    odd length m = 2r + 1. The estimator targets the center index of the window, 
+    so it incurs a delay of r drift observations.
 
-    The CI is: weighted_mean ± (DE + SE) where:
-    - DE = γ * Σ w_i * d(x_target, x_i)  (discretization error)
-    - SE = sqrt(3.3 * V_t * (2*log(log(max(1, V_t))) + log(2/δ)))  (statistical error)
-    - V_t = Σ (w_i * σ)²  (weighted variance, with σ = (b-a)/2)
+    The confidence interval radius is fixed to be
 
-    Delayed Estimation:
-    When delay > 0, estimates E[R] at target = T - delay instead of T.
-    This allows weighting strategies like OptimalTemporalWeights to use
-    symmetric lookahead (indices both before and after target).
+        R = B * sqrt(2 * log(2 / delta) / m)
+            + B * (rho + 1) * (m^2 - 1) / (4m)
+
+    where B is the one-step drift bound and rho is the one-step transition
+    Wasserstein Lipschitz constant.
+
+    This CI will have to be updated for continuous-time weights.
     """
 
-    def __init__(
-        self,
-        weighting: Optional[WeightingStrategy] = None,
-        delta: float = 0.01,
-        delay: Union[int, Literal["auto"]] = 0,
-    ):
+    def __init__(self, weighting: WeightingStrategy, delta: float):
         """
         Args:
-            weighting: Weighting strategy for combining historical rewards.
-            delta: Confidence level for the CI (default 0.01 for 99% confidence).
-            delay: Number of steps to delay estimation. Options:
-                   - 0: Estimate at latest timestep T (default, no lookahead)
-                   - int > 0: Estimate at T - delay (fixed delay)
-                   - "auto": Compute delay from OptimalTemporalWeights.get_optimal_m()
+            weighting: Centered uniform weighting strategy over drift history.
+            delta: Confidence level for the CI.
         """
-        self.weighting = weighting or RecentWeights(k=10)
+        self.weighting = weighting
         self.delta = delta
-        self.delay = delay
-
-    def _get_delay(self, adapter: DynamicalSystemAdapter) -> int:
-        """Compute the actual delay value (number of neighbors in one direction)."""
-        if self.delay == "auto":
-            if isinstance(self.weighting, OptimalTemporalWeights):
-                return self.weighting.get_optimal_m(adapter)
-            else:
-                # For non-optimal weighting, auto delay doesn't make sense
-                return 0
-        return int(self.delay)
+        if not isinstance(weighting, UniformWeights) and not isinstance(weighting, OptimalTemporalWeights):
+            raise ValueError("SE and DE are tuned for uniform weights (move their implementation to weighting classes for new types of weights)")
 
     def __call__(self, adapter):
-        history = adapter.get_state_history()
-        T = len(history) - 1 # index of last step
-        delay = self._get_delay(adapter)
-        target = T - delay
+        drift_history = adapter.get_drift_history()
 
-        # Need at least one prior state to have a reward, and target must be valid
-        if T < 1 or target < delay: # TODO: delay?
-            info = { "T": T, "target": target, "delay": delay, "reason": "insufficient history" }
+        current_drift_index = len(drift_history) - 1
+        weighting_radius = self.weighting.get_radius()
+        target = current_drift_index - weighting_radius
+
+        maybeWeights = self.weighting(drift_history, target)
+
+        if maybeWeights is None:
+            info = { 
+                "current_drift_index": current_drift_index, 
+                "target": target, 
+                "delay": weighting_radius, 
+                "reason": "insufficient history" 
+            }
             return "?", float('-inf'), float('inf'), info
 
-        # Compute observed rewards R_i for each transition i -> i+1
-        get_reward_at = lambda i: adapter.get_reward(
-            next_state=history[i+1],
-            cur_state=history[i]
-        )
-        rewards = [float(get_reward_at(i)) for i in range(T)]
-
-        # Get weights centered around target (allows lookahead when target < T)
-        weights = self.weighting(adapter, target - 1)  # -1 because reward indices are 0 to T-1
-
-        # Weighted mean of observed rewards
-        weighted_mean = sum(w * r for w, r in zip(weights, rewards))
-
-        # Discretization error: DE = γ * Σ w_i * d(x_target, x_i)
-        # Note: we use the TARGET state, not the latest state
+        # Aliases for paper notation
         gamma = adapter.get_drift_bound()
+        m = 2 * weighting_radius + 1 # compute length of sliding window
+        rho = adapter.get_transition_wasserstein_lipschitz()
 
-        dist = lambda i, j: abs(i-j)
-        # To do spatial distance instead: something like
-        # dist = lambda i,j: adapter.distance(history[i], history[j])
+        # \hat{d}_c^{(m)}
+        weighted_mean = float(torch.dot(drift_history, maybeWeights))
 
-        DE = sum(w * gamma * dist(target, i) for i, w in enumerate(weights))
+        SE = gamma * sqrt((2*log(2/self.delta)) / m)
+        DE = gamma * (rho + 1) * (m**2 -1)/(4*m)
 
-        # Statistical error
-        reward_bounds = adapter.get_reward_bounds() # TODO too loose
-        sigma = (reward_bounds[1] - reward_bounds[0]) / 2  # sub-Gaussian norm from bounded rewards
-
-        # V_t = Σ (w_i * σ)²
-        V_t = sum((w * sigma) ** 2 for w in weights)
-        num = gamma * log(2/self.delta)
-        denom = 2 * delay + 1
-        SE = sqrt(num/denom)
+        # R_{DT}^{ctr}(m)
+        error = SE + DE
 
         # Final CI
-        lower = weighted_mean - DE - SE
-        upper = weighted_mean + DE + SE
+        lower = weighted_mean - error
+        upper = weighted_mean + error
 
-        safety = "T" if upper < 0 else "F" if lower > 0 else "?"
+        safety = "T" if upper <= 0 else "F" if lower > 0 else "?"
         info = { 
-            "T": T,
+            "current_drift_index": current_drift_index,
             "target": target,
-            "delay": delay,
-            "center": weighted_mean,
+            "delay": weighting_radius,
+            "weighted_mean": weighted_mean,
             "DE": DE,
             "SE": SE,
-            "V_t": V_t 
         }
         return safety, lower, upper, info
 
@@ -148,7 +118,7 @@ class SamplingEstimator(Estimator):
     the maximum sample count is reached.
     """
 
-    def __init__(self, delta: float = 0.01):
+    def __init__(self, delta):
         self.delta = delta
         self.hoeffding_cache = {}
 
