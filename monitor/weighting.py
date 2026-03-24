@@ -9,13 +9,13 @@ class WeightingStrategy(ABC):
     """Abstract base class for computing weights over the trajectory history."""
 
     @abstractmethod
-    def __call__(self, adapter: DynamicalSystemAdapter, t: int) -> List[float]:
+    def __call__(self, adapter: DynamicalSystemAdapter, target: int) -> List[float]:
         """
-        Compute weights for estimating E[R] at target timestep t.
+        Compute weights for estimating E[R] at index `target`.
 
         Args:
             adapter: The dynamical system adapter with state history.
-            t: Target timestep to estimate (0-indexed).
+            target: Target timestep to estimate (0-indexed).
 
         Returns:
             List of weights of length len(adapter.state_history), summing to 1.

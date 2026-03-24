@@ -48,6 +48,7 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         self.step_count = 0
         self.state = torch.tensor([float(self.initial_value)], dtype=torch.float32)
         self.state_history: List[torch.Tensor] = [self.state.clone()]
+        self.drift_history: List[float] = []
 
     def done(self) -> bool:
         return self.step_count >= self.max_steps or self._done
@@ -73,6 +74,7 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         self.step_count += 1
         self.state = self.state + increment
         self.state_history.append(self.state.clone())
+        self.drift_history.append(float(increment))
         return self.state.clone()
 
     def get_reward_bounds(self) -> Tuple[float, float]:
@@ -101,6 +103,9 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
 
     def get_state_history(self) -> torch.Tensor:
         return torch.stack(self.state_history)
+
+    def get_drift_history(self) -> torch.Tensor:
+        return torch.tensor(self.drift_history, dtype=torch.float32)
 
     def sample(self, state: Optional[torch.Tensor] = None, n_samples: int = 1) -> torch.Tensor:
         if state is None:

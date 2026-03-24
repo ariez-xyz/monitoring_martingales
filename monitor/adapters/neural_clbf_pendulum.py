@@ -103,6 +103,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self.applied_control_history = []  # Noisy control history (for diagnostics)
         self._step_count = 0
         self.clf_history = [float(self.get_certificate_value())]
+        self.drift_history = []
         self._cached_control = None
         self.is_done = False
         self._monitor_reject_step = None
@@ -155,18 +156,15 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         """Take one simulation step using nominal controller."""
         state_batch = self.state.unsqueeze(0)
 
+        # Compute next state:
         with torch.no_grad():
             # Get control-affine dynamics
             f, g = self.dynamics.control_affine_dynamics(state_batch)
-
             # Update nominal control only at specified frequency (zero-order hold).
             u_nominal = self._get_control(state_batch, use_hold=True)
-
             u = u_nominal + self._sample_control_noise(n_samples=1)
-
             # Compute state derivative: ẋ = f + g @ u
             xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
-
             # Euler integration
             next_state = self.state + self.dt * xdot.squeeze(0)
 
@@ -175,7 +173,9 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self.control_history.append(float(u_nominal.squeeze()))
         self.applied_control_history.append(float(u.squeeze()))
         self._step_count += 1
-        self.clf_history.append(float(self.get_certificate_value()))
+        clf_value = float(self.get_certificate_value())
+        self.drift_history.append(clf_value - self.clf_history[-1])
+        self.clf_history.append(clf_value)
         self._advance_flip_mode()
 
         # Visualization
@@ -264,6 +264,15 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
     def get_state_history(self) -> torch.Tensor:
         """Return history of states."""
         return torch.stack(self.state_history)
+
+    def get_drift_history(self) -> torch.Tensor:
+        """
+        Return the history of per-step drifts.
+
+        Returns:
+            Tensor of shape (n_steps) representing past drifts.
+        """
+        return torch.tensor(self.drift_history)
 
     def distance(self, state1: torch.Tensor, state2: torch.Tensor) -> float:
         """Euclidean distance on full state."""

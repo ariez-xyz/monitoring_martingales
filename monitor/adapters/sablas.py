@@ -90,6 +90,7 @@ class SablasDrone(DynamicalSystemAdapter):
         self.state, self.obstacle, self.goal = self.env.reset(seed=seed)
         self.state_error = torch.zeros(1, self.get_state_dim(), dtype=torch.float32)
         self.state_history = [torch.from_numpy(self.state).float()]
+        self.drift_history = []
         self._cached_control = None
         self.is_done = False
         self._step_count = 0
@@ -190,6 +191,7 @@ class SablasDrone(DynamicalSystemAdapter):
         """
         Take one simulation step using the NN controller.
         """
+        cur_state_tensor = torch.from_numpy(self.state).float()
         u = self._get_control_input(self.state)
         state_next, state_nominal_next, obstacle_next, goal_next, done = self.env.step(u)
 
@@ -201,7 +203,9 @@ class SablasDrone(DynamicalSystemAdapter):
         self.obstacle = obstacle_next
         self.goal = goal_next
         self.is_done = bool(done)
-        self.state_history.append(torch.from_numpy(self.state).float())
+        next_state_tensor = torch.from_numpy(self.state).float()
+        self.state_history.append(next_state_tensor)
+        self.drift_history.append(float(self.get_reward(next_state_tensor, cur_state_tensor)))
 
         self._step_count += 1
         if self.vis_every > 0 and self._step_count % self.vis_every == 0:
@@ -248,6 +252,10 @@ class SablasDrone(DynamicalSystemAdapter):
     def get_state_history(self) -> torch.Tensor:
         """Return the history of states."""
         return torch.stack(self.state_history)
+
+    def get_drift_history(self) -> torch.Tensor:
+        """Return the history of realized one-step drifts."""
+        return torch.tensor(self.drift_history, dtype=torch.float32)
 
     def distance(self, state1: torch.Tensor, state2: torch.Tensor) -> float:
         """Euclidean distance on full state."""

@@ -90,6 +90,16 @@ class DynamicalSystemAdapter(ABC):
         pass
 
     @abstractmethod
+    def get_drift_history(self) -> torch.Tensor:
+        """
+        Return the history of per-step drifts.
+
+        Returns:
+            Tensor of shape (n_steps) representing past drifts.
+        """
+        pass
+
+    @abstractmethod
     def sample(self, state: Optional[torch.Tensor] = None, n_samples: int = 1) -> torch.Tensor:
         """
         Samples 'n_samples' next states for given or current state.
