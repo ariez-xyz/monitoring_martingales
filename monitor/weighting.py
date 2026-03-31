@@ -53,14 +53,13 @@ class UniformWeights(WeightingStrategy):
 class OptimalTemporalWeights(WeightingStrategy):
     """Centered uniform window with radius chosen from the discrete-time guide.
 
-    The implementation guide derives the leading-order optimal odd window length
-    m* for the centered estimator as
+    The optimal odd window length m* for the centered estimator is given by
 
         m* ≈ (2 * sqrt(2 * log(2 / delta)) / (rho + 1))^(2/3)
 
     where rho is the one-step transition-kernel Lipschitz constant in W1.
     We convert that optimal window length to a centered window radius r by
-    choosing the nearest odd integer m and setting r = (m - 1) / 2.
+    choosing the nearest integer to r = (m* - 1) / 2.
     """
 
     def __init__(self, adapter: DynamicalSystemAdapter, delta: float):
