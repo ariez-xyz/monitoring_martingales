@@ -49,7 +49,7 @@ class HypothesisTestingMonitor:
         """
         # Note: We assume adapter.dt never varies, so B_n = B for all n
         B = self.adapter.get_drift_bound() 
-        return min(1/B, max(0, self.S(n-1) / (self.V(n-1) + B**2)))
+        return min(1/B, max(0, self.S(n) / (self.V(n) + B**2)))
 
     def S(self, n) -> float:
         assert len(self.Delta) >= n-1
@@ -91,9 +91,9 @@ class HypothesisTestingMonitor:
                     "n": n, 
                     "e_value": e_value,
                     "Delta_{n-1}": self.Delta[n - 1],
-                    "S_{n-1}": self.S(n - 1),
-                    "V_{n-1}": self.V(n - 1),
-                    "beta{n-1}": self.beta(n - 1),
+                    "S_n": self.S(n),
+                    "V_n": self.V(n),
+                    "beta_{n-1}": self.beta(n - 1),
                     "threshold": 1 / self.delta
                 }
 
