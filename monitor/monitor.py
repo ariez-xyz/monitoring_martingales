@@ -35,7 +35,7 @@ class HypothesisTestingMonitor:
         self.adapter = adapter
         self.delta = delta
         self.last_verdict = "?"
-        self.G_cache: List[float] = [1]
+        self.E_cache: List[float] = [1]
         self.S_cache: List[float] = [0]
         self.V_cache: List[float] = [0]
         self.Delta: List[float] = []
@@ -43,7 +43,10 @@ class HypothesisTestingMonitor:
     def cur_cert_value(self) -> float:
         return float(self.adapter.get_certificate_value())
 
-    def eta(self, n) -> float:
+    def beta(self, n) -> float:
+        """
+        Predictable plug-in bet
+        """
         # Note: We assume adapter.dt never varies, so B_n = B for all n
         B = self.adapter.get_drift_bound() 
         return min(1/B, max(0, self.S(n-1) / (self.V(n-1) + B**2)))
@@ -64,13 +67,13 @@ class HypothesisTestingMonitor:
             self.V_cache.append(next_V)
         return self.V_cache[n]
 
-    def G(self, n) -> float:
+    def E(self, n) -> float:
         assert len(self.Delta) >= n-1
         if n <= 0: return 1
-        for k in range(len(self.G_cache), n+1):
-            next_G = self.G_cache[-1] * (1 + self.eta(k-1) * self.Delta[k-1])
-            self.G_cache.append(next_G)
-        return self.G_cache[n]
+        for k in range(len(self.E_cache), n+1):
+            next_E = self.E_cache[-1] * (1 + self.beta(k-1) * self.Delta[k-1])
+            self.E_cache.append(next_E)
+        return self.E_cache[n]
 
     def run(self) -> Generator[Tuple[Literal["F","?"], Any], None, None]:
         n = 0 # number of transitions taken
@@ -82,7 +85,7 @@ class HypothesisTestingMonitor:
                 drift = self.cur_cert_value() - certificate_value
                 self.Delta.append(drift)
                 n += 1
-                e_value = self.G(n)
+                e_value = self.E(n)
 
                 info = {
                     "n": n, 
@@ -90,7 +93,7 @@ class HypothesisTestingMonitor:
                     "Delta_{n-1}": self.Delta[n - 1],
                     "S_{n-1}": self.S(n - 1),
                     "V_{n-1}": self.V(n - 1),
-                    "eta_{n-1}": self.eta(n - 1),
+                    "beta{n-1}": self.beta(n - 1),
                     "threshold": 1 / self.delta
                 }
 
@@ -99,7 +102,7 @@ class HypothesisTestingMonitor:
                     yield "F", info
                 elif e_value >= 1/self.delta:
                     self.last_verdict = "F"
-                    info["reason"] = f"G_{n} >= {1/self.delta} (1/delta)"
+                    info["reason"] = f"E_{n} >= {1/self.delta} (1/delta)"
                     yield "F", info
                 else:
                     yield "?", info
