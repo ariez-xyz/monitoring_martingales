@@ -77,13 +77,7 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         self.drift_history.append(float(increment))
         return self.state.clone()
 
-    def get_reward_bounds(self) -> Tuple[float, float]:
-        return (
-            self.mean - self.clamp_at_sigma * self.sigma,
-            self.mean + self.clamp_at_sigma * self.sigma,
-        )
-
-    def get_reward(
+    def get_drift(
         self, next_state: torch.Tensor, cur_state: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         if cur_state is None:
@@ -122,7 +116,10 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         return float(torch.abs(state1[0] - state2[0]))
 
     def get_drift_bound(self) -> float:
-        lo, hi = self.get_reward_bounds()
+        lo, hi = (
+            self.mean - self.clamp_at_sigma * self.sigma,
+            self.mean + self.clamp_at_sigma * self.sigma,
+        )
         return max(abs(lo), abs(hi))
 
     def get_transition_wasserstein_lipschitz(self) -> float:

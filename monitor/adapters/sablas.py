@@ -34,7 +34,7 @@ class SablasDrone(DynamicalSystemAdapter):
         # sablas uses identity (α(h) = h), see sablas/modules/trainer.py:78,142,209
         #   deriv_cond = (h_next - h) / self.dt + h  # i.e., ḣ + α(h) with α = identity
         self._alpha: Callable[[float], float] = lambda h: h
-        self._reward_bounds_cache: Optional[Tuple[float, float]] = None
+        self._drift_bounds_cache: Optional[Tuple[float, float]] = None
 
         # Certificate bounds - the sablas CBF network is unbounded (Tanh defined but not
         # applied in forward pass, see sablas/modules/network.py:21,43).
@@ -43,7 +43,7 @@ class SablasDrone(DynamicalSystemAdapter):
         # Values outside are clamped in get_certificate_value.
         self.certificate_bounds: Tuple[float, float] = (-2.0, 0.86)
 
-        # Lipschitz constant for expected reward function.
+        # Lipschitz constant for expected drift function.
         # Empirically estimated via scripts/estimate_gamma.py over 50k steps.
         # 99th percentile ~0.43, max ~7. Using 1.0 as a balanced default.
         self.lipschitz_constant: float = 1.0
@@ -83,7 +83,7 @@ class SablasDrone(DynamicalSystemAdapter):
     @alpha.setter
     def alpha(self, value: Callable[[float], float]):
         self._alpha = value
-        self._reward_bounds_cache = None
+        self._drift_bounds_cache = None
 
     def reset(self, seed: Optional[int] = None):
         """Resets the environment and the adapter's internal state."""
@@ -110,31 +110,35 @@ class SablasDrone(DynamicalSystemAdapter):
         need_update = self._cached_control is None or self._step_count % self.update_control_every == 0
         if need_update:
             self._cached_control = self._compute_control_input(state)
-        return self._cached_control
+        return self._cached_control # type: ignore
 
     def _peek_control_input(self, state: np.ndarray) -> np.ndarray:
         """Get control for hypothetical transitions without mutating held-control state."""
         need_update = self._cached_control is None or self._step_count % self.update_control_every == 0
         if need_update:
             return self._compute_control_input(state)
-        return self._cached_control
+        return self._cached_control # type: ignore
 
     def done(self) -> bool:
         return self.is_done
 
-    def get_reward_bounds(self) -> Tuple[float, float]:
-        """Computes reward bounds from certificate bounds and alpha.
+    def get_drift_bound(self) -> float:
+        """Computes drift bounds from certificate bounds and alpha.
 
-        Reward = (cur_v - next_v) - α(cur_v) = f(cur_v) - next_v
+        drift = (cur_v - next_v) - α(cur_v) = f(cur_v) - next_v
         where f(v) = v - α(v).
 
-        Since reward is linear (decreasing) in next_v, extremes occur at next_v boundaries.
+        Since drift is linear (decreasing) in next_v, extremes occur at next_v boundaries.
         For cur_v, we sample f(v) to find its range, handling any α without assuming α'≤1.
 
         Results are cached; cache invalidates when alpha is reassigned.
         """
-        if self._reward_bounds_cache is not None:
-            return self._reward_bounds_cache
+        def interval_to_abs_bound(interval):
+            lo, hi = interval
+            return max(abs(lo), abs(hi))
+
+        if self._drift_bounds_cache is not None:
+            return interval_to_abs_bound(self._drift_bounds_cache)
 
         cert_lo, cert_hi = self.certificate_bounds
 
@@ -144,18 +148,18 @@ class SablasDrone(DynamicalSystemAdapter):
         f_values = [v - self.alpha(v) for v in vs]
         f_min, f_max = min(f_values), max(f_values)
 
-        # reward = f(cur_v) - next_v
-        # reward_lo: minimize f(cur_v), maximize next_v
-        # reward_hi: maximize f(cur_v), minimize next_v
+        # drift = f(cur_v) - next_v
+        # drift_lo: minimize f(cur_v), maximize next_v
+        # drift_hi: maximize f(cur_v), minimize next_v
         # TODO: currently this doesn't take into account that we won't probably transition from 
         # minimum to maximum value of f in a single step?
-        reward_lo = f_min - cert_hi
-        reward_hi = f_max - cert_lo
+        drift_lo = f_min - cert_hi
+        drift_hi = f_max - cert_lo
 
-        self._reward_bounds_cache = (reward_lo, reward_hi)
-        return self._reward_bounds_cache
+        self._drift_bounds_cache = (drift_lo, drift_hi)
+        return interval_to_abs_bound(self._drift_bounds_cache)
 
-    def get_reward(self, next_state: torch.Tensor, cur_state: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def get_drift(self, next_state: torch.Tensor, cur_state: Optional[torch.Tensor] = None) -> torch.Tensor:
         cur_v = float(self.get_certificate_value(cur_state))
         next_v = self.get_certificate_value(next_state)
         # V(x) - V(Y) - α(V(x)) ≤ 0 means CBF condition satisfied
@@ -205,7 +209,7 @@ class SablasDrone(DynamicalSystemAdapter):
         self.is_done = bool(done)
         next_state_tensor = torch.from_numpy(self.state).float()
         self.state_history.append(next_state_tensor)
-        self.drift_history.append(float(self.get_reward(next_state_tensor, cur_state_tensor)))
+        self.drift_history.append(float(self.get_drift(next_state_tensor, cur_state_tensor)))
 
         self._step_count += 1
         if self.vis_every > 0 and self._step_count % self.vis_every == 0:
@@ -261,15 +265,6 @@ class SablasDrone(DynamicalSystemAdapter):
         """Euclidean distance on full state."""
         return float(torch.linalg.norm(state1 - state2))
 
-    def get_drift_bound(self) -> float:
-        """Returns a provisional drift-bound proxy for SABLAS.
-
-        TODO: revisit this quantity once the SABLAS adapter is brought back in
-        line with the current monitoring theory. For now this preserves the
-        previous behavior under a less misleading name.
-        """
-        return self.lipschitz_constant
-
     def get_transition_wasserstein_lipschitz(self) -> float:
         raise NotImplementedError("rho is not implemented yet for SablasDrone")
 
@@ -315,7 +310,7 @@ class SablasDrone(DynamicalSystemAdapter):
         self._vis_ax.clear()
         self._vis_ax.set_xlim(0, 20)
         self._vis_ax.set_ylim(0, 20)
-        self._vis_ax.set_zlim(0, 20)
+        self._vis_ax.set_zlim(0, 20) # type: ignore
 
         drone_pos = self.state[:3]
         self._vis_ax.scatter(*drone_pos, color='darkred', label='drone')

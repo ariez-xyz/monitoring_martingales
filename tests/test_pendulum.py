@@ -185,7 +185,7 @@ def test_pendulum_seeded_bounds_cover_observed_step_drift():
                 f"seed={seed}"
             )
 
-def test_pendulum_reward_sign_convention():
+def test_pendulum_drift_sign_convention():
     """Pendulum uses CLF residual: V(y) - V(x), so negative means safe."""
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
     adapter = NeuralCLBFPendulum(dt=0.01, noise_level=0.0)
@@ -197,12 +197,12 @@ def test_pendulum_reward_sign_convention():
 
     # Independent residual formula from CLF condition.
     residual = next_v - cur_v
-    reward = adapter.get_reward(next_states, cur_state)
+    drift = adapter.get_drift(next_states, cur_state)
 
     check_close(
-        reward,
+        drift,
         residual,
-        "Pendulum reward must equal CLF residual V(y) - V(x)",
+        "Pendulum drift must equal CLF residual V(y) - V(x)",
     )
-    assert ((reward <= 0) == (residual <= 0)).all(), "Sign convention mismatch for pendulum"
+    assert ((drift <= 0) == (residual <= 0)).all(), "Sign convention mismatch for pendulum"
 

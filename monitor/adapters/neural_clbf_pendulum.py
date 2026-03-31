@@ -66,8 +66,8 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         # V_min ≈ 0 at origin (goal state)
         self.certificate_bounds: Tuple[float, float] = (0.0, 22.0)
 
-        # Temporal Lipschitz constant γ = |ΔR|/k (reward change per timestep)
-        # Cached by (dt, noise_level) since both affect reward variation.
+        # Temporal Lipschitz constant γ = |ΔR|/k (drift change per timestep)
+        # Cached by (dt, noise_level) since both affect drift variation.
         # Used by OptimalTemporalWeights for m* = (c1/γ)^(2/3)
         self._drift_bound_cache: Dict[Tuple[float, float], float] = {}
 
@@ -116,19 +116,11 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             return True
         return self.is_done
 
-    def get_reward_bounds(self) -> Tuple[float, float]:
-        """Compute reward bounds from certificate bounds.
+    def get_drift(self, next_state: torch.Tensor, cur_state: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Compute drift: V(Y) - V(x).
 
-        Reward = V(x) - V(Y), so bounds are [cert_lo - cert_hi, cert_hi - cert_lo].
-        """
-        cert_lo, cert_hi = self.certificate_bounds
-        return (cert_lo - cert_hi, cert_hi - cert_lo)
-
-    def get_reward(self, next_state: torch.Tensor, cur_state: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Compute reward: V(Y) - V(x).
-
-        For CLF, we want V to decrease, so negative reward means CLF condition satisfied.
-        This matches the interface contract: E[reward] <= 0 indicates safety.
+        For CLF, we want V to decrease, so negative drift means CLF condition satisfied.
+        This matches the interface contract: E[drift] <= 0 indicates safety.
         """
         cur_v = self.get_certificate_value(cur_state)
         next_v = self.get_certificate_value(next_state)
@@ -321,7 +313,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
     ) -> Union[float, Tuple[float, List[float]]]:
         """Estimate conservative one-step drift bound from rollout samples.
 
-        At each state, evaluates reward for endpoint control noises
+        At each state, evaluates drift for endpoint control noises
         (+/- noise_level) and keeps max(|Delta V|). Returns a high percentile
         over all collected samples.
 
@@ -349,9 +341,9 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         for _ in range(n_episodes):
             self.reset()
             for step in range(max_steps):
-                # Compute a conservative one-step reward proxy at the current state:
+                # Compute a conservative one-step drift proxy at the current state:
                 # evaluate both endpoint control noises (+/- noise_level) and keep
-                # the larger absolute reward magnitude.
+                # the larger absolute drift magnitude.
                 state_batch = self.state.unsqueeze(0)
                 with torch.no_grad():
                     f, g = self.dynamics.control_affine_dynamics(state_batch)
@@ -372,13 +364,13 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
                         next_state_minus = next_state_plus
 
                 V_cur = float(self.get_certificate_value(self.state))
-                reward_plus = float(self.get_certificate_value(next_state_plus)) - V_cur
-                reward_minus = float(self.get_certificate_value(next_state_minus)) - V_cur
-                step_bound = max(abs(reward_plus), abs(reward_minus))
+                drift_plus = float(self.get_certificate_value(next_state_plus)) - V_cur
+                drift_minus = float(self.get_certificate_value(next_state_minus)) - V_cur
+                step_bound = max(abs(drift_plus), abs(drift_minus))
                 step_bound_samples.append(step_bound)
 
                 # Roll out trajectory with a sampled noise draw to keep state coverage
-                # broad while using endpoint rewards for conservative local variation.
+                # broad while using endpoint drifts for conservative local variation.
                 with torch.no_grad():
                     u_rollout = u_nominal + self._sample_control_noise(n_samples=1)
                     xdot_rollout = f.squeeze(-1) + (g @ u_rollout.unsqueeze(-1)).squeeze(-1)

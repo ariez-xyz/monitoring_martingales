@@ -72,7 +72,7 @@ for verdict, info in monitor.run():
 
 ## Methodology
 
-The core quantity is the one-step reward
+The core quantity is the one-step drift
 
 $R_t = V(X_{t+1}) - V(X_t)$
 
@@ -100,8 +100,8 @@ Estimates $\mathbb{E}[R_t]$ by sampling $n$ next states from the simulator.
 ### 3. History-Based Estimator
 Estimates $\mathbb{E}[R_t]$ using past observed transitions $x_1, \dots, x_t$ without resetting the simulator.
 *   **Pros**: No simulator resets required; pure runtime monitoring.
-*   **Cons**: Requires Lipschitz assumptions on system and reward function.
-*   **Key Insight**: Uses a weighted average of past rewards, balancing **Discretization Error** (distance between current state and past states) and **Statistical Error** (variance of the estimator).
+*   **Cons**: Requires Lipschitz assumptions on system and value function.
+*   **Key Insight**: Uses a weighted average of past drifts, balancing **Discretization Error** (distance between current state and past states) and **Statistical Error** (variance of the estimator).
 
 ### Hypothesis-testing monitor
 

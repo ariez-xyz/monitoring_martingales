@@ -214,7 +214,7 @@ def test_certificate_correlates_with_safety():
         assert mean_dist_when_v_neg < mean_dist_when_v_pos, \
             f"V < 0 should mean closer to obstacles"
 
-def test_sablas_reward_sign_convention():
+def test_sablas_drift_sign_convention():
     """Sablas uses CBF residual: (h(x) - h(y)) - alpha(h(x)), so non-positive means safe."""
     adapter = SablasDrone(dt=0.1, noise_level=0.1)
 
@@ -226,11 +226,11 @@ def test_sablas_reward_sign_convention():
     # Independent residual formula from CBF condition in adapter docs.
     alpha_cur = float(adapter.alpha(float(cur_v)))
     residual = (float(cur_v) - next_v) - alpha_cur
-    reward = adapter.get_reward(next_states, cur_state)
+    drift = adapter.get_drift(next_states, cur_state)
 
     check_close(
-        reward,
+        drift,
         residual,
-        "Sablas reward must equal CBF residual (h(x)-h(y)) - alpha(h(x))",
+        "Sablas drift must equal CBF residual (h(x)-h(y)) - alpha(h(x))",
     )
-    assert ((reward <= 0) == (residual <= 0)).all(), "Sign convention mismatch for sablas"
+    assert ((drift <= 0) == (residual <= 0)).all(), "Sign convention mismatch for sablas"

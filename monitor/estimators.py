@@ -14,7 +14,7 @@ class Estimator(ABC):
         """
         Estimate E[R] for the adapter's current state and return a confidence interval.
 
-        The reward R = V(Y) - V(x) - α(V(x)) where Y ~ P(x) is the next state.
+        The drift R = V(Y) - V(x) - α(V(x)) where Y ~ P(x) is the next state.
         E[R] ≤ 0 indicates the certificate condition is satisfied (safe).
 
         Args:
@@ -124,29 +124,30 @@ class SamplingEstimator(Estimator):
 
     def __call__(self, adapter, max_extra: int = 4096):
         sampled_states = adapter.sample(n_samples=512)
-        rewards = adapter.get_reward(sampled_states)
+        drifts = adapter.get_drift(sampled_states)
 
         for n_extra in [0, 512, 1024, 2048, 4096]:
             if n_extra:
                 sampled_states = adapter.sample(n_samples=n_extra)
-                extra_rewards = adapter.get_reward(sampled_states)
-                rewards = torch.cat([rewards, extra_rewards], dim=0)
-            ci = self._hoeffding_ci(adapter, rewards.shape[0])
-            mean = rewards.mean().item()
+                extra_drifts = adapter.get_drift(sampled_states)
+                drifts = torch.cat([drifts, extra_drifts], dim=0)
+            ci = self._hoeffding_ci(adapter, drifts.shape[0])
+            mean = drifts.mean().item()
             lower, upper = (mean-ci, mean+ci)
             if upper < 0 or lower > 0 or n_extra >= max_extra:
                 break
 
         safety = "T" if upper < 0 else "F" if lower > 0 else "?" # type: ignore[possibly-unbound]
-        info = {"n_samples": int(rewards.shape[0])}
+        info = {"n_samples": int(drifts.shape[0])}
         return safety, lower, upper, info                        # type: ignore[possibly-unbound]
 
     def _hoeffding_ci(self, adapter, n):
-        reward_bounds = adapter.get_reward_bounds()
-        cache_key = (n, reward_bounds)
+        B = adapter.get_drift_bound()
+        drift_bounds = -B, B # TODO: maybe use a proper interval for this
+        cache_key = (n, drift_bounds)
         cached = self.hoeffding_cache.get(cache_key)
         if cached: return cached
-        range_squared = (reward_bounds[1] - reward_bounds[0]) ** 2
+        range_squared = (drift_bounds[1] - drift_bounds[0]) ** 2
         log_term = log(pi / sqrt(6) * log(n))
         val = sqrt((1.064 * range_squared * 2 * log_term + log(2/self.delta)) / n)
         self.hoeffding_cache[cache_key] = val
@@ -158,7 +159,7 @@ class AnalyticEstimator(Estimator):
     Computes E[R] ≈ V(E[Y]) - V(x) - α(V(x)) using analytic expected next state.
 
     This exploits the fact that for many systems, Jensen's gap is small:
-    V(E[Y]) ≈ E[V(Y)], so we can compute expected reward without Monte Carlo.
+    V(E[Y]) ≈ E[V(Y)], so we can compute expected drift without Monte Carlo.
 
     Requires the adapter to implement get_expected_next_state().
     Returns a degenerate CI (point estimate) since there's no sampling variance.
@@ -166,11 +167,11 @@ class AnalyticEstimator(Estimator):
 
     def __call__(self, adapter):
         expected_next_state = adapter.get_expected_next_state()
-        # get_reward expects batched input
+        # unsqueeze: get_drift expects batched input
         expected_next_state = expected_next_state.unsqueeze(0)
-        reward = float(adapter.get_reward(expected_next_state)) # V(E[Y])
+        drift = float(adapter.get_drift(expected_next_state)) # V(E[Y])
 
         # Degenerate CI: point estimate with zero width
-        lower, upper = reward, reward
-        safety = "T" if reward < 0 else "F" if reward > 0 else "?"
+        lower, upper = drift, drift
+        safety = "T" if drift < 0 else "F" if drift > 0 else "?"
         return safety, lower, upper, {}

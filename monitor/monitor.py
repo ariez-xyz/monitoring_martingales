@@ -79,8 +79,8 @@ class HypothesisTestingMonitor:
             while not self.adapter.done():
                 certificate_value = self.cur_cert_value()
                 self.adapter.step()
-                reward = self.cur_cert_value() - certificate_value
-                self.Delta.append(reward)
+                drift = self.cur_cert_value() - certificate_value
+                self.Delta.append(drift)
                 n += 1
                 e_value = self.G(n)
 

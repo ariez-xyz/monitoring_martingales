@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, Tuple
+from typing import List, Optional
 import torch
 import numpy as np
 
@@ -22,21 +22,11 @@ class DynamicalSystemAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_reward_bounds(self) -> Tuple[float, float]:
+    def get_drift(self, next_state: torch.Tensor, cur_state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        Returns (lower, upper) bounds on the reward returned by get_reward().
+        Calculates the drift for monitoring the certificate condition.
 
-        These bounds are required for concentration inequalities (e.g., Hoeffding).
-        Implementations should raise an exception if observed values exceed these bounds.
-        """
-        pass
-
-    @abstractmethod
-    def get_reward(self, next_state: torch.Tensor, cur_state: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Calculates the reward for monitoring the certificate condition.
-
-        The reward should be computed such that E[reward] ≤ 0 indicates the
+        The drift should be computed such that E[drift] ≤ 0 indicates the
         certificate condition is satisfied. Adapters handle sign conventions
         and alpha functions internally.
 
@@ -45,9 +35,32 @@ class DynamicalSystemAdapter(ABC):
             cur_state: Optional current state tensor. If None, uses adapter's current state.
 
         Returns:
-            Tensor of shape (n_samples,) representing reward for each sample.
+            Tensor of shape (n_samples,) representing drift for each sample.
         """
         pass
+
+    @abstractmethod
+    def get_drift_history(self) -> torch.Tensor:
+        """
+        Return the history of per-step drifts.
+
+        Returns:
+            Tensor of shape (n_steps) representing past drifts.
+        """
+        pass
+
+    @abstractmethod
+    def get_drift_bound(self) -> float:
+        """
+        Returns a bound on the magnitude of the one-step drift.
+        These bounds are required for concentration inequalities (e.g., Hoeffding).
+        Implementations should raise an exception if observed values exceed these bounds.
+
+        Raises:
+            NotImplementedError: If a drift bound is not available.
+        """
+        raise NotImplementedError("Drift bound not available for this adapter")
+
 
     @abstractmethod
     def get_certificate_value(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -90,16 +103,6 @@ class DynamicalSystemAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_drift_history(self) -> torch.Tensor:
-        """
-        Return the history of per-step drifts.
-
-        Returns:
-            Tensor of shape (n_steps) representing past drifts.
-        """
-        pass
-
-    @abstractmethod
     def sample(self, state: Optional[torch.Tensor] = None, n_samples: int = 1) -> torch.Tensor:
         """
         Samples 'n_samples' next states for given or current state.
@@ -135,15 +138,6 @@ class DynamicalSystemAdapter(ABC):
         """
         pass
 
-    def get_drift_bound(self) -> float:
-        """
-        Returns a bound on the magnitude of the one-step reward or drift.
-
-        Raises:
-            NotImplementedError: If a drift bound is not available.
-        """
-        raise NotImplementedError("Drift bound not available for this adapter")
-
     def get_transition_wasserstein_lipschitz(self) -> float:
         """
         Returns a Lipschitz bound rho for the one-step transition kernel in W1.
@@ -162,7 +156,7 @@ class DynamicalSystemAdapter(ABC):
 
         When Jensen's gap is small (i.e., V is approximately linear over the
         noise distribution), V(E[Y]) ≈ E[V(Y)], allowing near-exact computation
-        of expected rewards without Monte Carlo sampling.
+        of expected drifts without Monte Carlo sampling.
 
         Args:
             state: Optional current state tensor. If None, uses adapter's current state.

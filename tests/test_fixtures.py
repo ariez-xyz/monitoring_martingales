@@ -26,13 +26,13 @@ def test_normal_increment_adapter_respects_reward_bounds_and_expectation():
 
     cur_state = adapter.state.clone()
     next_states = adapter.sample(n_samples=512)
-    rewards = adapter.get_reward(next_states, cur_state)
-    lower, upper = adapter.get_reward_bounds()
+    rewards = adapter.get_drift(next_states, cur_state)
+    B = adapter.get_drift_bound()
 
     expected_rewards = next_states[:, 0] - cur_state[0]
     assert torch.allclose(rewards, expected_rewards)
-    assert float(rewards.min()) >= lower - 1e-6
-    assert float(rewards.max()) <= upper + 1e-6
+    assert float(rewards.min()) >= -(B + 1e-6)
+    assert float(rewards.max()) <=   B + 1e-6
 
     expected_next = adapter.get_expected_next_state(cur_state)
     assert torch.allclose(expected_next, cur_state + adapter.mean)
@@ -51,7 +51,6 @@ def test_normal_increment_adapter_0sigma_as_expected():
     adapter = NormalIncrementAdapter(mean=-1, sigma=0, initial_value=200)
     while not adapter.done():
         adapter.step()
-    assert adapter.get_reward_bounds() == (-1, -1)
     assert adapter.get_drift_bound() == 1
     assert len(adapter.get_state_history()) == 201
     assert float(adapter.get_state_history()[0]) == 200
