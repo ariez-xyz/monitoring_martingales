@@ -77,6 +77,8 @@ class DynamicalSystemAdapter(ABC):
         """
         Take a simulation step.
 
+        Each call to step() should append a drift to the tensor returned by get_drift_history().
+
         Returns:
             Tensor of shape (state_dim) representing next state.
         """

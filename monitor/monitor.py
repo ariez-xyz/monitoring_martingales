@@ -52,6 +52,9 @@ class HypothesisTestingMonitor:
         return min(1/B, max(0, self.S(n) / (self.V(n) + B**2)))
 
     def S(self, n) -> float:
+        """
+        S_n = sum_{i=0}^{n-1} Delta_i
+        """
         assert len(self.Delta) >= n-1
         if n <= 0: return 0
         for k in range(len(self.S_cache), n+1):
@@ -60,6 +63,9 @@ class HypothesisTestingMonitor:
         return self.S_cache[n]
 
     def V(self, n) -> float:
+        """
+        V_n = sum_{i=0}^{n-1} Delta_i ** 2
+        """
         assert len(self.Delta) >= n-1
         if n <= 0: return 0
         for k in range(len(self.V_cache), n+1):
@@ -80,10 +86,8 @@ class HypothesisTestingMonitor:
 
         try:
             while not self.adapter.done():
-                certificate_value = self.cur_cert_value()
                 self.adapter.step()
-                drift = self.cur_cert_value() - certificate_value
-                self.Delta.append(drift)
+                self.Delta = self.adapter.get_drift_history().tolist()
                 n += 1
                 e_value = self.E(n)
 

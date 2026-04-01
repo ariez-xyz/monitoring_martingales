@@ -174,7 +174,6 @@ def test_pendulum_seeded_bounds_cover_observed_step_drift():
                 adapter.step()
                 v_next = float(adapter.get_certificate_value())
                 observed_drift = abs(v_next - v_cur)
-                print(observed_drift)
                 observed_max = max(observed_max, observed_drift)
                 if adapter.done():
                     break
@@ -206,3 +205,28 @@ def test_pendulum_drift_sign_convention():
     )
     assert ((drift <= 0) == (residual <= 0)).all(), "Sign convention mismatch for pendulum"
 
+
+def test_pendulum_step_appends_exactly_one_drift():
+    """Each pendulum step should append exactly one realized drift."""
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+
+    adapter = NeuralCLBFPendulum(dt=0.1, noise_level=0.0)
+    initial_state_len = len(adapter.get_state_history())
+    initial_drift_len = len(adapter.get_drift_history())
+
+    prev_cert = float(adapter.get_certificate_value())
+
+    extra_steps = 10
+    for step_idx in range(1000):
+        if adapter.done():
+            extra_steps -= 1
+            if extra_steps <= 0: break
+        adapter.step()
+        cur_state_len = len(adapter.get_state_history())
+        cur_drift_len = len(adapter.get_drift_history())
+        cur_cert = float(adapter.get_certificate_value())
+        assert cur_state_len == initial_state_len + step_idx + 1
+        assert cur_drift_len == initial_drift_len + step_idx + 1
+        assert cur_state_len == cur_drift_len + 1
+        assert abs(float(adapter.get_drift_history()[-1]) - (cur_cert - prev_cert)) < 1e-6
+        prev_cert = cur_cert

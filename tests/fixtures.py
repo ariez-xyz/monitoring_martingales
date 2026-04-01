@@ -64,12 +64,13 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         return increments
 
     def step(self) -> torch.Tensor:
-        increment = self._draw_increments(1)[0]
-        if self.state + increment < 0: 
-            self._done = True
-
         if self.done():
             return self.state.clone()
+
+        increment = self._draw_increments(1)[0]
+        if self.state + increment <= 0:
+            increment = -self.state # keep CLF nonnegative
+            self._done = True
 
         self.step_count += 1
         self.state = self.state + increment

@@ -27,7 +27,7 @@ def test_plugin_bet_matches_formula():
         monitor = HypothesisTestingMonitor(adapter=adapter, delta=0.1)
 
         results = list(monitor.run()) # Run monitor
-        beta = [monitor.beta(i) for i in range(11)]
+        beta = [monitor.beta(i) for i in range(len(monitor.Delta))]
 
         assert len(monitor.Delta) == len(beta) == len(results)
 
