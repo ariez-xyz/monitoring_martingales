@@ -80,16 +80,11 @@ class HistoryEstimator(Estimator):
             }
             return "?", float('-inf'), float('inf'), info
 
-        # Aliases for paper notation
-        gamma = adapter.get_drift_bound()
-        m = 2 * weighting_radius + 1 # compute length of sliding window
-        rho = adapter.get_transition_wasserstein_lipschitz()
-
         # \hat{d}_c^{(m)}
         weighted_mean = float(torch.dot(drift_history, maybeWeights))
 
-        SE = gamma * sqrt((2*log(2/self.delta)) / m)
-        DE = gamma * (rho + 1) * (m**2 -1)/(4*m)
+        SE = self.weighting.SE(adapter, self.delta)
+        DE = self.weighting.DE(adapter)
 
         # R_{DT}^{ctr}(m)
         error = SE + DE

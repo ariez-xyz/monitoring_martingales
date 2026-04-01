@@ -28,6 +28,15 @@ class WeightingStrategy(ABC):
         """
         pass
 
+    @abstractmethod
+    def DE(self, adapter: DynamicalSystemAdapter) -> float:
+        pass
+
+    @abstractmethod
+    def SE(self, adapter: DynamicalSystemAdapter, delta: float) -> float:
+        pass
+
+
 
 class UniformWeights(WeightingStrategy):
     """Sliding window of 2radius+1 uniform weights centered around target."""
@@ -49,6 +58,16 @@ class UniformWeights(WeightingStrategy):
         weights[start_idx:end_idx + 1] = 1.0 / window_length
         return weights
 
+    def DE(self, adapter: DynamicalSystemAdapter) -> float:
+        gamma = adapter.get_drift_bound()
+        rho = adapter.get_transition_wasserstein_lipschitz()
+        m = 2 * self.r + 1
+        return gamma * (rho + 1) * (m**2 -1)/(4*m)
+
+    def SE(self, adapter: DynamicalSystemAdapter, delta: float) -> float:
+        gamma = adapter.get_drift_bound()
+        m = 2 * self.r + 1
+        return gamma * sqrt((2*log(2/delta)) / m)
 
 class OptimalTemporalWeights(WeightingStrategy):
     """Centered uniform window with radius chosen from the discrete-time guide.
@@ -78,3 +97,9 @@ class OptimalTemporalWeights(WeightingStrategy):
 
     def __call__(self, drift_history: torch.Tensor, target: int) -> Optional[torch.Tensor]:
         return self.weights(drift_history, target)
+
+    def DE(self, adapter: DynamicalSystemAdapter) -> float:
+        return self.weights.DE(adapter)
+
+    def SE(self, adapter: DynamicalSystemAdapter, delta: float) -> float:
+        return self.weights.SE(adapter, delta)
