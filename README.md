@@ -41,7 +41,7 @@ This monitor is able to attest validity, but it additionally requires an estimat
 from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
 from monitor.estimators import HistoryEstimator
 from monitor.weighting import OptimalTemporalWeights
-from monitor.monitor import NeuralCertificateMonitor
+from monitor.monitors import NeuralCertificateMonitor
 
 # 1. Initialize the system and the monitor
 adapter = NeuralCLBFPendulum()
@@ -112,7 +112,7 @@ This path is useful when you want an online rejection test instead of a confiden
 ## Project Structure
 
 *   `monitor/`: Core monitoring logic.
-    *   `monitor.py`: Estimator-based monitor and hypothesis-testing monitor.
+    *   `monitors.py`: Estimator-based monitor and hypothesis-testing monitor.
     *   `estimators.py`: Implementation of estimators (Analytic, Sampling, History).
     *   `adapters/`: Interfaces for specific environments (Sablas, Neural-CLBF).
     *   `weighting.py`: Weighting strategies for history-based estimation.
