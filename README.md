@@ -7,18 +7,24 @@ This project implements runtime monitoring for neural control systems using cert
 The project uses a shared virtual environment for all submodules.
 
 ```bash
-# Create and activate virtual environment
+# 1. Create and activate virtual environment
 uv venv --python 3.9
 source .venv/bin/activate  # adjust for shell
 
-# Install all dependencies (including submodules and core package)
+# 2. Install dependencies
 uv pip install -r requirements.txt
 
-# Demo
-pytest -s tests/test_integration.py::test_monitor_demo
+# ⚠️ IMPORTANT ⚠️
+# pytorch-lightning is REQUIRED for neural_clbf. It requires 
+# pyyaml <= 5.4.1, which fails to build. However, pyyaml 6.0.3 
+# builds and works fine. 
+# Therefore, requirements.txt installs pyyaml==6.0.3, and 
+# pytorch-lightning must be installed manually afterward
+# with --no-deps.
+uv pip install pytorch-lightning==1.3.8 --no-deps
 
-# Optional: run all tests
-pytest -s tests/
+# 3. Verify installation
+pytest
 ```
 
 
