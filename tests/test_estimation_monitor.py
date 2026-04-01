@@ -40,3 +40,4 @@ def test_history_estimator_averages_sliding_window():
     assert math.isclose(info["weighted_mean"], 44/9, abs_tol=1e-6)
     assert lower <= 44/9 <= upper
     assert verdict in {"T", "F", "?"}
+
