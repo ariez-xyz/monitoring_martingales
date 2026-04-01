@@ -1,3 +1,4 @@
+import math
 import torch
 
 from monitor.weighting import UniformWeights, OptimalTemporalWeights
@@ -32,3 +33,30 @@ def test_optimal_temporal_weights_radius_correct():
     weighting = OptimalTemporalWeights(adapter, 0.000001)
     # optimal_window_length = 3.072928182547332
     assert weighting.get_radius() == 1
+
+
+def test_uniform_weights_se_and_de_match_formula_for_fixture():
+    """UniformWeights should implement the centered-window formulas exactly."""
+    adapter = NormalIncrementAdapter(mean=-1.0, sigma=0.0, initial_value=10.0)
+    weighting = UniformWeights(radius=1)
+
+    # For this fixture, B = 1 and rho = 1.
+    # radius = 1 => m = 3
+    expected_se = math.sqrt(2 * math.log(2 / 0.01) / 3)
+    expected_de = 2 * (3**2 - 1) / (4 * 3)
+
+    assert math.isclose(weighting.SE(adapter, 0.01), expected_se)
+    assert math.isclose(weighting.DE(adapter), expected_de)
+
+
+def test_optimal_temporal_weights_se_and_de_delegate_to_uniform_weights():
+    """OptimalTemporalWeights should match the uniform window it chooses."""
+    adapter = NormalIncrementAdapter(mean=-1.0, sigma=0.0, initial_value=10.0)
+    delta = 0.01
+
+    optimal = OptimalTemporalWeights(adapter, delta)
+    uniform = UniformWeights(radius=optimal.get_radius())
+
+    assert optimal.get_radius() == 1
+    assert math.isclose(optimal.SE(adapter, delta), uniform.SE(adapter, delta))
+    assert math.isclose(optimal.DE(adapter), uniform.DE(adapter))
