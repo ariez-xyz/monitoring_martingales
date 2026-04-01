@@ -1,3 +1,4 @@
+import math
 from monitor.estimators import HistoryEstimator
 from monitor.weighting import UniformWeights
 from tests.fixtures import NormalIncrementAdapter
@@ -36,6 +37,6 @@ def test_history_estimator_averages_sliding_window():
     assert info["current_drift_index"] == 9
     assert info["target"] == 5
     assert info["delay"] == 4
-    assert abs(info["weighted_mean"] - 44/9) < 1e-6
+    assert math.isclose(info["weighted_mean"], 44/9, abs_tol=1e-6)
     assert lower <= 44/9 <= upper
     assert verdict in {"T", "F", "?"}
