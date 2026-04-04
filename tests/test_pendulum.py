@@ -206,6 +206,56 @@ def test_pendulum_drift_sign_convention():
     assert ((drift <= 0) == (residual <= 0)).all(), "Sign convention mismatch for pendulum"
 
 
+def test_pendulum_empirical_drift_bound_estimation_does_not_mutate_live_state():
+    """Empirical drift-bound estimation should not disturb the live adapter rollout."""
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+
+    adapter = NeuralCLBFPendulum(dt=0.1, noise_level=0.0)
+    adapter.reset(seed=123)
+    adapter.step()
+    adapter.step()
+
+    state_before = adapter.state.clone()
+    state_history_before = adapter.get_state_history().clone()
+    drift_history_before = adapter.get_drift_history().clone()
+    control_history_before = list(adapter.control_history)
+    applied_control_history_before = list(adapter.applied_control_history)
+    clf_history_before = list(adapter.clf_history)
+    step_count_before = adapter._step_count
+    done_before = adapter.is_done
+    cached_control_before = (
+        None if adapter._cached_control is None else adapter._cached_control.clone()
+    )
+
+    gamma = adapter._estimate_drift_bound(n_episodes=1, max_steps=2)
+
+    assert gamma > 0 # type:ignore
+    assert torch.allclose(adapter.state, state_before)
+    assert torch.allclose(adapter.get_state_history(), state_history_before)
+    assert torch.allclose(adapter.get_drift_history(), drift_history_before)
+    assert adapter.control_history == control_history_before
+    assert adapter.applied_control_history == applied_control_history_before
+    assert adapter.clf_history == clf_history_before
+    assert adapter._step_count == step_count_before
+    assert adapter.is_done == done_before
+    if cached_control_before is None:
+        assert adapter._cached_control is None
+    else:
+        assert adapter._cached_control is not None
+        assert torch.allclose(adapter._cached_control, cached_control_before)
+
+
+def test_pendulum_endpoint_noise_iterator_rejects_nonzero_certificate_slope():
+    """Endpoint-noise drift calibration is only defined for the unmodified CLF."""
+    import pytest
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+
+    adapter = NeuralCLBFPendulum(dt=0.1, noise_level=0.0, certificate_slope=0.1)
+
+    with pytest.raises(ValueError, match="Certificate slope must be 0"):
+        next(adapter._noisy_transitions(n_episodes=1, max_steps=1))
+
+
 def test_pendulum_step_appends_exactly_one_drift():
     """Each pendulum step should append exactly one realized drift."""
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum

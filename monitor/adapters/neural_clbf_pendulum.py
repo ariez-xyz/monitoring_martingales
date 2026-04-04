@@ -1,6 +1,6 @@
 """Adapter for neural_clbf inverted pendulum system."""
 from .interface import DynamicalSystemAdapter
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Generator, List, Optional, Tuple, Union
 import torch
 import numpy as np
 
@@ -34,6 +34,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             vis_block: If True, wait for keypress after each visualization
         """
         # Load pretrained controller
+        self.checkpoint_path = checkpoint_path
         self.controller = NeuralCLBFController.load_from_checkpoint(checkpoint_path)
         self.controller.eval()
         self.dynamics = self.controller.dynamics_model
@@ -304,6 +305,64 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
     def get_transition_wasserstein_lipschitz(self) -> float:
         raise NotImplementedError("rho is not implemented yet for NeuralCLBFPendulum")
 
+    def _noisy_transitions(
+        self,
+        n_episodes: int = 5,
+        max_steps: int = 20000,
+    ) -> Generator[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], None, None]:
+        """Yield current states with endpoint-noise successor states from a cloned adapter.
+
+        The clone advances using sampled control noise to explore realistic
+        closed-loop states. At each visited state, the iterator emits the
+        current state together with the next states induced by the minimum and
+        maximum 1D control perturbations, which are used as conservative
+        endpoint proxies for estimating one-step bounds.
+        """
+        if self.certificate_slope != 0:
+            raise ValueError("Certificate slope must be 0 when estimating drift bound.")
+
+        pendulum_copy = NeuralCLBFPendulum(
+            checkpoint_path=self.checkpoint_path,
+            dt=self.dt,
+            noise_level=self.noise_level,
+            vis_every=0,
+            vis_block=False,
+            certificate_slope=0,
+            flip_inputs_prob_to=self.flip_inputs_prob_to,
+            flip_inputs_prob_from=self.flip_inputs_prob_from,
+        )
+
+        for _ in range(n_episodes):
+            pendulum_copy.reset()
+            for _ in range(max_steps):
+                # Find both endpoint perturbations (+/- noise_level) at the current state
+                state_batch = pendulum_copy.state.unsqueeze(0)
+                with torch.no_grad():
+                    f, g = pendulum_copy.dynamics.control_affine_dynamics(state_batch)
+                    u_nominal = pendulum_copy._get_control(state_batch)
+                    noise_plus = torch.full((1, 1), pendulum_copy.noise_level, dtype=u_nominal.dtype)
+                    noise_minus = -noise_plus
+                    u_plus = u_nominal + noise_plus
+                    u_minus = u_nominal + noise_minus
+                    xdot_plus = f.squeeze(-1) + (g @ u_plus.unsqueeze(-1)).squeeze(-1)
+                    xdot_minus = f.squeeze(-1) + (g @ u_minus.unsqueeze(-1)).squeeze(-1)
+                    next_state_plus = pendulum_copy.state + pendulum_copy.dt * xdot_plus.squeeze(0)
+                    next_state_minus = pendulum_copy.state + pendulum_copy.dt * xdot_minus.squeeze(0)
+
+                # Rollout the clone with noise sampled in the standard manner
+                with torch.no_grad():
+                    u_rollout = u_nominal + pendulum_copy._sample_control_noise(n_samples=1)
+                    xdot_rollout = f.squeeze(-1) + (g @ u_rollout.unsqueeze(-1)).squeeze(-1)
+                    next_state_rollout = pendulum_copy.state + pendulum_copy.dt * xdot_rollout.squeeze(0)
+
+                yield pendulum_copy.state, next_state_minus, next_state_plus
+
+                pendulum_copy.state = next_state_rollout
+                pendulum_copy._step_count += 1
+
+                if pendulum_copy.done():
+                    break
+
     def _estimate_drift_bound(
         self,
         n_episodes: int = 5,
@@ -326,70 +385,18 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             Estimated bound proxy.
             If return_diffs=True, returns (bound, samples).
         """
-        # Save current state
-        saved_state = self.state.clone()
-        saved_history = list(self.state_history)
-        saved_control = list(self.control_history)
-        saved_applied_control = list(self.applied_control_history)
-        saved_clf = list(self.clf_history)
-        saved_step = self._step_count
-        saved_done = self.is_done
-
         # Per-step bound proxy samples for |Delta V| at each visited state.
         step_bound_samples: List[float] = []
 
-        for _ in range(n_episodes):
-            self.reset()
-            for step in range(max_steps):
-                # Compute a conservative one-step drift proxy at the current state:
-                # evaluate both endpoint control noises (+/- noise_level) and keep
-                # the larger absolute drift magnitude.
-                state_batch = self.state.unsqueeze(0)
-                with torch.no_grad():
-                    f, g = self.dynamics.control_affine_dynamics(state_batch)
-                    u_nominal = self._get_control(state_batch)
-                    if self.noise_level > 0 and self.dynamics.n_controls == 1:
-                        noise_plus = torch.full((1, 1), self.noise_level, dtype=u_nominal.dtype)
-                        noise_minus = -noise_plus
-                        u_plus = u_nominal + noise_plus
-                        u_minus = u_nominal + noise_minus
-                        xdot_plus = f.squeeze(-1) + (g @ u_plus.unsqueeze(-1)).squeeze(-1)
-                        xdot_minus = f.squeeze(-1) + (g @ u_minus.unsqueeze(-1)).squeeze(-1)
-                        next_state_plus = self.state + self.dt * xdot_plus.squeeze(0)
-                        next_state_minus = self.state + self.dt * xdot_minus.squeeze(0)
-                    else:
-                        # Zero-noise case and generic multi-control fallback.
-                        xdot_nominal = f.squeeze(-1) + (g @ u_nominal.unsqueeze(-1)).squeeze(-1)
-                        next_state_plus = self.state + self.dt * xdot_nominal.squeeze(0)
-                        next_state_minus = next_state_plus
-
-                V_cur = float(self.get_certificate_value(self.state))
-                drift_plus = float(self.get_certificate_value(next_state_plus)) - V_cur
-                drift_minus = float(self.get_certificate_value(next_state_minus)) - V_cur
-                step_bound = max(abs(drift_plus), abs(drift_minus))
-                step_bound_samples.append(step_bound)
-
-                # Roll out trajectory with a sampled noise draw to keep state coverage
-                # broad while using endpoint drifts for conservative local variation.
-                with torch.no_grad():
-                    u_rollout = u_nominal + self._sample_control_noise(n_samples=1)
-                    xdot_rollout = f.squeeze(-1) + (g @ u_rollout.unsqueeze(-1)).squeeze(-1)
-                    next_state_rollout = self.state + self.dt * xdot_rollout.squeeze(0)
-
-                self.state = next_state_rollout
-                self._step_count += 1
-
-                if self.done():
-                    break
-
-        # Restore state
-        self.state = saved_state
-        self.state_history = saved_history
-        self.control_history = saved_control
-        self.applied_control_history = saved_applied_control
-        self.clf_history = saved_clf
-        self._step_count = saved_step
-        self.is_done = saved_done
+        for current_state, next_state_minus, next_state_plus in self._noisy_transitions(
+            n_episodes,
+            max_steps,
+        ):
+            V_cur = float(self.get_certificate_value(current_state)) 
+            drift_plus = float(self.get_certificate_value(next_state_plus)) - V_cur
+            drift_minus = float(self.get_certificate_value(next_state_minus)) - V_cur
+            step_bound = max(abs(drift_plus), abs(drift_minus))
+            step_bound_samples.append(step_bound)
 
         gamma = float(np.percentile(step_bound_samples, percentile))
         gamma = max(gamma, 1e-6)  # Avoid zero
