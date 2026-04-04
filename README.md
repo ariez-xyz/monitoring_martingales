@@ -44,14 +44,14 @@ The monitor assigns the following verdicts:
 This monitor is able to attest validity, but it additionally requires an estimator and a weighting strategy.
 
 ```python
-from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+from monitor.adapters import NeuralCLBFPendulum
 from monitor.estimators import HistoryEstimator
-from monitor.weighting import OptimalTemporalWeights
-from monitor.monitors import NeuralCertificateMonitor
+from monitor.weighting import UniformWeights
+from monitor import NeuralCertificateMonitor
 
 # 1. Initialize the system and the monitor
 adapter = NeuralCLBFPendulum()
-weighting = OptimalTemporalWeights()
+weighting = UniformWeights(radius=10)  # window size = 2*radius+1
 estimator = HistoryEstimator(weighting, delta=0.01)
 monitor = NeuralCertificateMonitor(adapter, estimator)
 
@@ -66,7 +66,7 @@ This monitor implements a one-sided sequential test based on a betting e-process
 
 ```python
 from monitor import HypothesisTestingMonitor
-from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+from monitor.adapters import NeuralCLBFPendulum
 
 adapter = NeuralCLBFPendulum()
 monitor = HypothesisTestingMonitor(adapter=adapter, delta=0.01)
