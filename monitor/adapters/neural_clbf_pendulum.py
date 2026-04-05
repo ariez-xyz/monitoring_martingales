@@ -285,6 +285,8 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         #     --fast-private --trials 10 --same-adapter-repeats 0 \
         #     --n-episodes 100 --max-steps 20000 --percentile 99.999 \
         #     --dt {0.001,0.01} --noise-level {0,0.1,1,10}
+        # TODO: Separate concerns. This method should only access precomputed values.
+        # The actual estimation should happen separately.
         preseed = {
             (0.001, 0.0): 0.20,
             (0.001, 0.1): 0.20,
@@ -309,8 +311,8 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self,
         n_episodes: int = 5,
         max_steps: int = 20000,
-    ) -> Generator[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], None, None]:
-        """Yield current states with endpoint-noise successor states from a cloned adapter.
+    ) -> Generator[Tuple[torch.Tensor, torch.Tensor], None, None]:
+        """Yield current state and noisy successor state batch.
 
         The clone advances using sampled control noise to explore realistic
         closed-loop states. At each visited state, the iterator emits the
@@ -355,7 +357,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
                     xdot_rollout = f.squeeze(-1) + (g @ u_rollout.unsqueeze(-1)).squeeze(-1)
                     next_state_rollout = pendulum_copy.state + pendulum_copy.dt * xdot_rollout.squeeze(0)
 
-                yield pendulum_copy.state, next_state_minus, next_state_plus
+                yield pendulum_copy.state, torch.stack([next_state_minus, next_state_plus])
 
                 pendulum_copy.state = next_state_rollout
                 pendulum_copy._step_count += 1
@@ -380,6 +382,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             n_episodes: Number of episodes to run
             max_steps: Max steps per episode
             percentile: Percentile of |Delta V| samples to return
+            return_diffs: If True, returns (bound, samples).
 
         Returns:
             Estimated bound proxy.
@@ -388,14 +391,9 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         # Per-step bound proxy samples for |Delta V| at each visited state.
         step_bound_samples: List[float] = []
 
-        for current_state, next_state_minus, next_state_plus in self._noisy_transitions(
-            n_episodes,
-            max_steps,
-        ):
-            V_cur = float(self.get_certificate_value(current_state)) 
-            drift_plus = float(self.get_certificate_value(next_state_plus)) - V_cur
-            drift_minus = float(self.get_certificate_value(next_state_minus)) - V_cur
-            step_bound = max(abs(drift_plus), abs(drift_minus))
+        for current_state, next_states in self._noisy_transitions(n_episodes, max_steps):
+            drift_batch = self.get_drift(next_states, current_state)
+            step_bound = float(torch.max(torch.abs(drift_batch)))
             step_bound_samples.append(step_bound)
 
         gamma = float(np.percentile(step_bound_samples, percentile))
