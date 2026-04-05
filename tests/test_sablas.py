@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+from monitor.calibration import LipschitzConstantProvider
 from monitor.adapters import SablasDrone
 from sablas.envs.env_drone import Drone
 from sablas.modules.network import NNController
@@ -103,20 +104,24 @@ def test_cross_validation_with_script():
 
 def test_sablas_control_period():
     """
-    Test that the sablas adapter returns fixed Lipschitz constant with fixed control cadence.
+    Test that the sablas adapter keeps fixed control cadence and currently lacks calibrated bounds.
 
     Verifies:
     1. Keeps control period fixed at 0.1s while dt changes simulation fidelity
     """
     print("\n--- Sablas Lipschitz Constant Test ---")
 
-    # Test fixed constant
+    # Bound lookup is not available yet for Sablas.
     adapter = SablasDrone()
-    gamma = adapter.get_drift_bound()
+    try:
+        LipschitzConstantProvider.get_drift_bound(adapter)
+        assert False, "Expected Sablas drift-bound lookup to be unavailable"
+    except KeyError:
+        pass
 
     assert adapter.control_period == 0.1
     assert adapter.update_control_every == 1
-    print(f"  Default dt=0.1: gamma = {gamma}, control period = {adapter.control_period}")
+    print(f"  Default dt=0.1: control period = {adapter.control_period}")
 
     # Smaller dt should keep control period fixed and increase hold count
     adapter_fine = SablasDrone(dt=0.05)

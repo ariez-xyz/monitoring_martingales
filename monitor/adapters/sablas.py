@@ -1,7 +1,7 @@
 from .interface import DynamicalSystemAdapter
 from sablas.envs.env_drone import Drone
 from sablas.modules.network import CBF, NNController
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 import torch
 import numpy as np
 
@@ -122,43 +122,6 @@ class SablasDrone(DynamicalSystemAdapter):
     def done(self) -> bool:
         return self.is_done
 
-    def get_drift_bound(self) -> float:
-        """Computes drift bounds from certificate bounds and alpha.
-
-        drift = (cur_v - next_v) - α(cur_v) = f(cur_v) - next_v
-        where f(v) = v - α(v).
-
-        Since drift is linear (decreasing) in next_v, extremes occur at next_v boundaries.
-        For cur_v, we sample f(v) to find its range, handling any α without assuming α'≤1.
-
-        Results are cached; cache invalidates when alpha is reassigned.
-        """
-        def interval_to_abs_bound(interval):
-            lo, hi = interval
-            return max(abs(lo), abs(hi))
-
-        if self._drift_bounds_cache is not None:
-            return interval_to_abs_bound(self._drift_bounds_cache)
-
-        cert_lo, cert_hi = self.certificate_bounds
-
-        # Sample f(v) = v - α(v) to find its range over [cert_lo, cert_hi]
-        n_samples = 1000
-        vs = [cert_lo + (cert_hi - cert_lo) * i / (n_samples - 1) for i in range(n_samples)]
-        f_values = [v - self.alpha(v) for v in vs]
-        f_min, f_max = min(f_values), max(f_values)
-
-        # drift = f(cur_v) - next_v
-        # drift_lo: minimize f(cur_v), maximize next_v
-        # drift_hi: maximize f(cur_v), minimize next_v
-        # TODO: currently this doesn't take into account that we won't probably transition from 
-        # minimum to maximum value of f in a single step?
-        drift_lo = f_min - cert_hi
-        drift_hi = f_max - cert_lo
-
-        self._drift_bounds_cache = (drift_lo, drift_hi)
-        return interval_to_abs_bound(self._drift_bounds_cache)
-
     def get_drift(self, next_state: torch.Tensor, cur_state: Optional[torch.Tensor] = None) -> torch.Tensor:
         cur_v = float(self.get_certificate_value(cur_state))
         next_v = self.get_certificate_value(next_state)
@@ -265,8 +228,19 @@ class SablasDrone(DynamicalSystemAdapter):
         """Euclidean distance on full state."""
         return float(torch.linalg.norm(state1 - state2))
 
-    def get_transition_wasserstein_lipschitz(self) -> float:
-        raise NotImplementedError("rho is not implemented yet for SablasDrone")
+    def bound_key(self) -> Dict[str, Any]:
+        return {
+            "adapter_class": type(self).__name__,
+            "dt": float(self.env.dt),
+            "noise_level": float(self.noise_level),
+            "k_obstacle": int(self.k_obs),
+        }
+
+    def noisy_transitions(self, samples: int = 4) -> Tuple[torch.Tensor, torch.Tensor]:
+        raise NotImplementedError("noisy_transitions is not implemented yet for SablasDrone")
+
+    def successor_distribution_for(self, state: torch.Tensor):
+        raise NotImplementedError("Successor distribution representation is not implemented yet for SablasDrone")
 
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """

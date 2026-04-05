@@ -4,6 +4,7 @@ from math import log, sqrt
 
 import torch
 from .adapters import DynamicalSystemAdapter
+from .calibration import LipschitzConstantProvider
 
 
 class WeightingStrategy(ABC):
@@ -59,13 +60,13 @@ class UniformWeights(WeightingStrategy):
         return weights
 
     def DE(self, adapter: DynamicalSystemAdapter) -> float:
-        gamma = adapter.get_drift_bound()
-        rho = adapter.get_transition_wasserstein_lipschitz()
+        gamma = LipschitzConstantProvider.get_drift_bound(adapter)
+        rho = LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter)
         m = 2 * self.r + 1
         return gamma * (rho + 1) * (m**2 -1)/(4*m)
 
     def SE(self, adapter: DynamicalSystemAdapter, delta: float) -> float:
-        gamma = adapter.get_drift_bound()
+        gamma = LipschitzConstantProvider.get_drift_bound(adapter)
         m = 2 * self.r + 1
         return gamma * sqrt((2*log(2/delta)) / m)
 
@@ -87,7 +88,7 @@ class OptimalTemporalWeights(WeightingStrategy):
             adapter: Adapter supplying the transition-kernel Lipschitz constant.
             delta: Confidence level.
         """
-        rho = adapter.get_transition_wasserstein_lipschitz()
+        rho = LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter)
         optimal_window_length = ((2 * sqrt(2 * log(2/delta)))/(rho + 1)) ** (2/3)
         optimal_radius = round((optimal_window_length-1)/2)
         self.weights = UniformWeights(radius=optimal_radius)

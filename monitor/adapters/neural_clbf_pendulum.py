@@ -1,6 +1,6 @@
 """Adapter for neural_clbf inverted pendulum system."""
 from .interface import DynamicalSystemAdapter
-from typing import Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import numpy as np
 
@@ -78,11 +78,6 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self.flip_inputs_prob_from = float(flip_inputs_prob_from)
 
         self.reset()
-
-    def mark_monitor_rejection(self, step_index: int):
-        """Record the first monitor rejection step for visualization."""
-        if self._monitor_reject_step is None:
-            self._monitor_reject_step = int(step_index)
 
     def reset(self, seed: Optional[int] = None, initial_state: Optional[torch.Tensor] = None):
         """Reset the simulation."""
@@ -181,12 +176,13 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         """Sample n next states (with noise if configured)."""
         resolved_state = self.resolve_state(state)
         state_batch = resolved_state.unsqueeze(0)
+
+        # For the live state, mirror the currently held control. For
+        # hypothetical queries, recompute control at the provided state.
         use_hold = state is None
 
         with torch.no_grad():
             f, g = self.dynamics.control_affine_dynamics(state_batch)
-            # For the live state, mirror the currently held control. For
-            # hypothetical queries, recompute control at the provided state.
             u_nominal = self._get_control(state_batch, use_hold=use_hold)
 
             # Draw control noise independently per sample.
@@ -271,141 +267,38 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         """Euclidean distance on full state."""
         return float(torch.linalg.norm(state1 - state2))
 
-    def get_drift_bound(self) -> float:
-        """Returns an empirical per-step drift bound proxy for current config.
-
-        For the test-based monitor we use this as a proxy for B_k at fixed step
-        size. It is estimated conservatively from one-step |Delta V| samples and
-        cached by (dt, noise_level).
-        """
-        cache_key = (float(self.dt), float(self.noise_level))
-
-        # Empirical preseeds (conservative rounded maxima) obtained with:
-        #   python scripts/check_pendulum_lipschitz_variance.py \
-        #     --fast-private --trials 10 --same-adapter-repeats 0 \
-        #     --n-episodes 100 --max-steps 20000 --percentile 99.999 \
-        #     --dt {0.001,0.01} --noise-level {0,0.1,1,10}
-        # TODO: Separate concerns. This method should only access precomputed values.
-        # The actual estimation should happen separately.
-        preseed = {
-            (0.001, 0.0): 0.20,
-            (0.001, 0.1): 0.20,
-            (0.001, 1.0): 0.20,
-            (0.001, 10.0): 0.25,
-            (0.01, 0.0): 1.95,
-            (0.01, 0.1): 1.90,
-            (0.01, 1.0): 2.00,
-            (0.01, 10.0): 2.50,
+    def bound_key(self) -> Dict[str, Any]:
+        if not self.flip_inputs_prob_from == self.flip_inputs_prob_to == 0:
+            raise ValueError("TODO: bounds with flip prob")
+        return {
+            "adapter_class": type(self).__name__,
+            "dt": float(self.dt),
+            "noise_level": float(self.noise_level),
         }
-        if cache_key in preseed and cache_key not in self._drift_bound_cache:
-            self._drift_bound_cache[cache_key] = preseed[cache_key]
 
-        if cache_key not in self._drift_bound_cache:
-            self._drift_bound_cache[cache_key] = self._estimate_drift_bound() # type: ignore
-        return self._drift_bound_cache[cache_key]
-
-    def get_transition_wasserstein_lipschitz(self) -> float:
-        raise NotImplementedError("rho is not implemented yet for NeuralCLBFPendulum")
-
-    def _noisy_transitions(
-        self,
-        n_episodes: int = 5,
-        max_steps: int = 20000,
-        n_sampled_transitions: int = 4,
-    ) -> Generator[Tuple[torch.Tensor, torch.Tensor], None, None]:
-        """Yield current state and noisy successor state batch.
-
-        The clone advances using sampled control noise to explore realistic
-        closed-loop states. At each visited state, the iterator emits the
-        current state together with a batch of next states consisting of the
-        minimum and maximum 1D control perturbations plus a few additional
-        sampled-noise successors.
-        """
-        if self.certificate_slope != 0:
-            raise ValueError("Certificate slope must be 0 when estimating drift bound.")
-
-        pendulum_copy = NeuralCLBFPendulum(
-            checkpoint_path=self.checkpoint_path,
-            dt=self.dt,
-            noise_level=self.noise_level,
-            vis_every=0,
-            vis_block=False,
-            certificate_slope=0,
-            flip_inputs_prob_to=self.flip_inputs_prob_to,
-            flip_inputs_prob_from=self.flip_inputs_prob_from,
+    def successor_distribution_for(self, state: torch.Tensor):
+        raise NotImplementedError(
+            "Successor distribution representation is not implemented yet for NeuralCLBFPendulum"
         )
 
-        for _ in range(n_episodes):
-            pendulum_copy.reset()
-            for _ in range(max_steps):
-                # Find both endpoint perturbations (+/- noise_level) at the current state
-                state_batch = pendulum_copy.state.unsqueeze(0)
-                with torch.no_grad():
-                    f, g = pendulum_copy.dynamics.control_affine_dynamics(state_batch)
-                    u_nominal = pendulum_copy._get_control(state_batch)
+    def noisy_transitions(self, samples: int = 4) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return the current state and a representative batch of noisy successors."""
+        current_state = self.state.clone()
+        state_batch = current_state.unsqueeze(0)
+        with torch.no_grad():
+            f, g = self.dynamics.control_affine_dynamics(state_batch)
+            u_nominal = self._get_control(state_batch, use_hold=True)
 
-                    # 1. Compute states at noise endpoints
-                    def make_state(noise):
-                        u = u_nominal + noise
-                        xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
-                        return pendulum_copy.state + pendulum_copy.dt * xdot.squeeze(0)
-                    max_noise = torch.full((1, 1), pendulum_copy.noise_level, dtype=u_nominal.dtype)
-                    endpoint_states = torch.stack([make_state(noise) for noise in (max_noise, -max_noise)])
+            def make_state(noise: torch.Tensor) -> torch.Tensor:
+                u = u_nominal + noise
+                xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
+                return current_state + self.dt * xdot.squeeze(0)
 
-                    # 2. Compute states with sampled noise using the adapter batch API
-                    sampled_next_states = pendulum_copy.sample(n_samples=n_sampled_transitions)
+            max_noise = torch.full((1, 1), self.noise_level, dtype=u_nominal.dtype)
+            endpoint_states = torch.stack([make_state(noise) for noise in (max_noise, -max_noise)])
+            sampled_next_states = self.sample(n_samples=samples)
 
-                # Rollout the clone with noise sampled in the standard manner
-                with torch.no_grad():
-                    u_rollout = u_nominal + pendulum_copy._sample_control_noise(n_samples=1)
-                    xdot_rollout = f.squeeze(-1) + (g @ u_rollout.unsqueeze(-1)).squeeze(-1)
-                    next_state_rollout = pendulum_copy.state + pendulum_copy.dt * xdot_rollout.squeeze(0)
-
-
-                yield pendulum_copy.state, torch.cat([endpoint_states, sampled_next_states], dim=0)
-
-                pendulum_copy.state = next_state_rollout
-                pendulum_copy._step_count += 1
-
-                if pendulum_copy.done():
-                    break
-
-    def _estimate_drift_bound(
-        self,
-        n_episodes: int = 5,
-        max_steps: int = 20000,
-        percentile: float = 99.999,
-        return_diffs: bool = False,
-    ) -> Union[float, Tuple[float, List[float]]]:
-        """Estimate conservative one-step drift bound from rollout samples.
-
-        At each state, evaluates drift for endpoint control noises
-        (+/- noise_level) and keeps max(|Delta V|). Returns a high percentile
-        over all collected samples.
-
-        Args:
-            n_episodes: Number of episodes to run
-            max_steps: Max steps per episode
-            percentile: Percentile of |Delta V| samples to return
-            return_diffs: If True, returns (bound, samples).
-
-        Returns:
-            Estimated bound proxy.
-            If return_diffs=True, returns (bound, samples).
-        """
-        # Per-step bound proxy samples for |Delta V| at each visited state.
-        step_bound_samples: List[float] = []
-
-        for current_state, next_states in self._noisy_transitions(n_episodes, max_steps):
-            drift_batch = self.get_drift(next_states, current_state)
-            step_bound = float(torch.max(torch.abs(drift_batch)))
-            step_bound_samples.append(step_bound)
-
-        gamma = float(np.percentile(step_bound_samples, percentile))
-        gamma = max(gamma, 1e-6)  # Avoid zero
-        if return_diffs:
-            return gamma, step_bound_samples
-        return gamma
+        return current_state, torch.cat([endpoint_states, sampled_next_states], dim=0)
 
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """

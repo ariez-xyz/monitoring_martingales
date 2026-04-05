@@ -1,5 +1,6 @@
 from typing import Generator, Tuple, Literal, Any, List, Dict
 from .adapters import DynamicalSystemAdapter
+from .calibration import LipschitzConstantProvider
 from .estimators import Estimator
 
 
@@ -48,7 +49,7 @@ class HypothesisTestingMonitor:
         Predictable plug-in bet
         """
         # Note: We assume adapter.dt never varies, so B_n = B for all n
-        B = self.adapter.get_drift_bound() 
+        B = LipschitzConstantProvider.get_drift_bound(self.adapter)
         return min(1/B, max(0, self.S(n) / (self.V(n) + B**2)))
 
     def S(self, n) -> float:

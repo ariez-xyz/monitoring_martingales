@@ -1,5 +1,6 @@
 """Tests for the neural_clbf pendulum adapter."""
 import torch
+from monitor.calibration import LipschitzConstantProvider
 
 from tests.fixtures import check_close
 
@@ -88,11 +89,12 @@ def test_pendulum_drift_bound_orders_widely_separated_timesteps():
     Test that the pendulum drift bound scales sensibly across far-apart dt values.
 
     Verifies:
-    1. The bound is positive and cached
+    1. The precomputed bound is positive and cached
     2. A much smaller dt gives a smaller bound
     3. A much larger dt gives a larger bound
     """
     import time
+    from monitor.calibration import LipschitzConstantEstimator
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
 
     print("\n--- Pendulum Drift Bound Ordering Test ---")
@@ -100,7 +102,7 @@ def test_pendulum_drift_bound_orders_widely_separated_timesteps():
     # Test bound lookup works
     adapter = NeuralCLBFPendulum(dt=0.01)
     start = time.time()
-    gamma1 = adapter.get_drift_bound()
+    gamma1 = LipschitzConstantProvider.get_drift_bound(adapter)
     time1 = time.time() - start
 
     assert gamma1 > 0, f"gamma should be positive, got {gamma1}"
@@ -109,19 +111,26 @@ def test_pendulum_drift_bound_orders_widely_separated_timesteps():
 
     # Test caching - second call should be instant
     start = time.time()
-    gamma1_cached = adapter.get_drift_bound()
+    gamma1_cached = LipschitzConstantProvider.get_drift_bound(adapter)
     time_cached = time.time() - start
 
     assert gamma1_cached == gamma1, "Cached value should match"
     assert time_cached < 0.01, f"Cached call should be instant, took {time_cached:.3f}s"
     print(f"  Cached call: {time_cached*1000:.2f}ms")
 
-    # Test widely separated dt values to avoid flakiness from estimation noise
+    # Compare a smaller precomputed dt.
     adapter_small_dt = NeuralCLBFPendulum(dt=0.001)
-    gamma_small = adapter_small_dt.get_drift_bound()
+    gamma_small = LipschitzConstantProvider.get_drift_bound(adapter_small_dt)
 
-    adapter_large_dt = NeuralCLBFPendulum(dt=0.1)
-    gamma_large = adapter_large_dt.get_drift_bound()
+    # Estimate a larger dt value inline through the new estimator path.
+    estimator = LipschitzConstantEstimator()
+    gamma_large = estimator.estimate_drift_bound(
+        lambda: NeuralCLBFPendulum(dt=0.1, noise_level=0.0),
+        n_episodes=20,
+        max_steps=100, # large dt doesn't need many steps
+        percentile=100.0,
+        samples_per_step=4,
+    )
 
     print(f"  dt=0.001: gamma = {gamma_small:.4f}")
     print(f"  dt=0.1:  gamma = {gamma_large:.4f}")
@@ -158,7 +167,7 @@ def test_pendulum_seeded_bounds_cover_observed_step_drift():
 
     for (dt, noise_level), expected_bound in seeded_bounds.items():
         adapter = NeuralCLBFPendulum(dt=dt, noise_level=noise_level)
-        gamma = adapter.get_drift_bound()
+        gamma = LipschitzConstantProvider.get_drift_bound(adapter)
         assert abs(gamma - expected_bound) < tol, (
             f"Unexpected cached bound for dt={dt}, noise={noise_level}: {gamma} vs {expected_bound}"
         )
@@ -208,6 +217,7 @@ def test_pendulum_drift_sign_convention():
 
 def test_pendulum_empirical_drift_bound_estimation_does_not_mutate_live_state():
     """Empirical drift-bound estimation should not disturb the live adapter rollout."""
+    from monitor.calibration import LipschitzConstantEstimator
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
 
     adapter = NeuralCLBFPendulum(dt=0.1, noise_level=0.0)
@@ -227,7 +237,12 @@ def test_pendulum_empirical_drift_bound_estimation_does_not_mutate_live_state():
         None if adapter._cached_control is None else adapter._cached_control.clone()
     )
 
-    gamma = adapter._estimate_drift_bound(n_episodes=1, max_steps=2)
+    estimator = LipschitzConstantEstimator()
+    gamma = estimator.estimate_drift_bound(
+        lambda: NeuralCLBFPendulum(dt=0.1, noise_level=0.0),
+        n_episodes=1,
+        max_steps=2,
+    )
 
     assert gamma > 0 # type:ignore
     assert torch.allclose(adapter.state, state_before)
@@ -245,17 +260,6 @@ def test_pendulum_empirical_drift_bound_estimation_does_not_mutate_live_state():
         assert torch.allclose(adapter._cached_control, cached_control_before)
 
 
-def test_pendulum_endpoint_noise_iterator_rejects_nonzero_certificate_slope():
-    """Endpoint-noise drift calibration is only defined for the unmodified CLF."""
-    import pytest
-    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
-
-    adapter = NeuralCLBFPendulum(dt=0.1, noise_level=0.0, certificate_slope=0.1)
-
-    with pytest.raises(ValueError, match="Certificate slope must be 0"):
-        next(adapter._noisy_transitions(n_episodes=1, max_steps=1))
-
-
 def test_pendulum_noisy_transitions_return_endpoints_plus_samples():
     """The iterator should return endpoint successors plus sampled-noise successors."""
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
@@ -263,7 +267,7 @@ def test_pendulum_noisy_transitions_return_endpoints_plus_samples():
     torch.manual_seed(0)
     adapter = NeuralCLBFPendulum(dt=0.1, noise_level=0.1)
 
-    current_state, next_states = next(adapter._noisy_transitions(n_episodes=1, max_steps=1, n_sampled_transitions=4))
+    current_state, next_states = adapter.noisy_transitions(samples=4)
 
     assert current_state.shape == (adapter.dynamics.n_dims,)
     assert next_states.shape == (6, adapter.dynamics.n_dims)

@@ -1,7 +1,8 @@
 """Reusable test fixtures for fast, deterministic monitor and estimator tests."""
 
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import torch
+from monitor.calibration import LipschitzConstantProvider
 from monitor.adapters.interface import DynamicalSystemAdapter
 
 
@@ -38,6 +39,8 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         self.base_seed = int(base_seed)
         self.clamp_at_sigma = clamp_at_sigma
         self._done = False
+        LipschitzConstantProvider.set_drift_bound(self, self._drift_bound())
+        LipschitzConstantProvider.set_transition_wasserstein_lipschitz(self, 1.0)
         self.reset(seed=self.base_seed)
 
     def reset(self, seed: Optional[int] = None):
@@ -110,23 +113,36 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         increments = self._draw_increments(n_samples).unsqueeze(-1)
         return state[0].unsqueeze(0) + increments
 
+    def noisy_transitions(self, samples: int = 4) -> Tuple[torch.Tensor, torch.Tensor]:
+        current_state = self.state.clone()
+        next_states = self.sample(n_samples=samples)
+        return current_state, next_states
+
+    def successor_distribution_for(self, state: torch.Tensor):
+        raise NotImplementedError(
+            "Successor distribution representation is not implemented yet for NormalIncrementAdapter"
+        )
+
     def get_state_dim(self) -> int:
         return 1
 
     def distance(self, state1: torch.Tensor, state2: torch.Tensor) -> float:
         return float(torch.abs(state1[0] - state2[0]))
 
-    def get_drift_bound(self) -> float:
+    def bound_key(self) -> Dict[str, Any]:
+        return {
+            "adapter_class": type(self).__name__,
+            "mean": float(self.mean),
+            "sigma": float(self.sigma),
+            "clamp_at_sigma": float(self.clamp_at_sigma),
+        }
+
+    def _drift_bound(self) -> float:
         lo, hi = (
             self.mean - self.clamp_at_sigma * self.sigma,
             self.mean + self.clamp_at_sigma * self.sigma,
         )
         return max(abs(lo), abs(hi))
-
-    def get_transition_wasserstein_lipschitz(self) -> float:
-        # Under additive state-independent noise, P(x) is a translated copy of
-        # the same increment law, so W1(P(x), P(x')) = |x - x'|.
-        return 1.0
 
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         if state is None:

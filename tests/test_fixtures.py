@@ -1,4 +1,5 @@
 from tests.fixtures import NormalIncrementAdapter
+from monitor.calibration import LipschitzConstantProvider
 import torch
 import pytest
 
@@ -27,7 +28,7 @@ def test_normal_increment_adapter_respects_reward_bounds_and_expectation():
     cur_state = adapter.state.clone()
     next_states = adapter.sample(n_samples=512)
     rewards = adapter.get_drift(next_states, cur_state)
-    B = adapter.get_drift_bound()
+    B = LipschitzConstantProvider.get_drift_bound(adapter)
 
     expected_rewards = next_states[:, 0] - cur_state[0]
     assert torch.allclose(rewards, expected_rewards)
@@ -36,7 +37,7 @@ def test_normal_increment_adapter_respects_reward_bounds_and_expectation():
 
     expected_next = adapter.get_expected_next_state(cur_state)
     assert torch.allclose(expected_next, cur_state + adapter.mean)
-    assert adapter.get_transition_wasserstein_lipschitz() == 1.0
+    assert LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter) == 1.0
 
     with pytest.raises(ValueError, match="sigma must be nonnegative"):
         NormalIncrementAdapter(mean=0.0, sigma=-1.0, initial_value=1.0)
@@ -51,7 +52,7 @@ def test_normal_increment_adapter_0sigma_as_expected():
     adapter = NormalIncrementAdapter(mean=-1, sigma=0, initial_value=200)
     while not adapter.done():
         adapter.step()
-    assert adapter.get_drift_bound() == 1
+    assert LipschitzConstantProvider.get_drift_bound(adapter) == 1
     assert len(adapter.get_state_history()) == 201
     assert float(adapter.get_state_history()[0]) == 200
     assert float(adapter.get_state_history()[50]) == 150

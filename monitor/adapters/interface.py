@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 import torch
 import numpy as np
 
@@ -48,19 +48,6 @@ class DynamicalSystemAdapter(ABC):
             Tensor of shape (n_steps) representing past drifts.
         """
         pass
-
-    @abstractmethod
-    def get_drift_bound(self) -> float:
-        """
-        Returns a bound on the magnitude of the one-step drift.
-        These bounds are required for concentration inequalities (e.g., Hoeffding).
-        Implementations should raise an exception if observed values exceed these bounds.
-
-        Raises:
-            NotImplementedError: If a drift bound is not available.
-        """
-        raise NotImplementedError("Drift bound not available for this adapter")
-
 
     @abstractmethod
     def get_certificate_value(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -140,14 +127,37 @@ class DynamicalSystemAdapter(ABC):
         """
         pass
 
-    def get_transition_wasserstein_lipschitz(self) -> float:
+    @abstractmethod
+    def bound_key(self) -> Dict[str, Any]:
         """
-        Returns a Lipschitz bound rho for the one-step transition kernel in W1.
+        Return a stable metadata dictionary used to look up calibrated bounds.
 
-        Raises:
-            NotImplementedError: If rho is not available for this adapter.
+        The returned dict should include all adapter configuration fields that
+        materially affect the calibrated constants. It must also include the
+        adapter class name so keys remain unique across adapter types.
         """
-        raise NotImplementedError("Transition-kernel Lipschitz bound rho not available for this adapter")
+        pass
+
+    @abstractmethod
+    def noisy_transitions(self, samples: int = 4) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Return the current state together with a representative batch of one-step successors.
+
+        Returns:
+            A tuple `(current_state, next_states)` where `current_state` has
+            shape `(state_dim,)` and `next_states` has shape
+            `(batch_size, state_dim)`.
+        """
+        pass
+
+    @abstractmethod
+    def successor_distribution_for(self, state: torch.Tensor):
+        """
+        Return an adapter-specific representation of the one-step successor law at `state`.
+
+        Adapters that do not support this yet should raise `NotImplementedError`.
+        """
+        raise NotImplementedError("Successor distribution representation not available for this adapter")
 
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """

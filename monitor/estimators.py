@@ -1,5 +1,6 @@
 from typing import Any, Dict, Literal, Tuple
 from .adapters import DynamicalSystemAdapter
+from .calibration import LipschitzConstantProvider
 from .weighting import OptimalTemporalWeights, UniformWeights, WeightingStrategy
 from math import log, sqrt, pi
 from abc import ABC, abstractmethod
@@ -137,7 +138,7 @@ class SamplingEstimator(Estimator):
         return safety, lower, upper, info                        # type: ignore[possibly-unbound]
 
     def _hoeffding_ci(self, adapter, n):
-        B = adapter.get_drift_bound()
+        B = LipschitzConstantProvider.get_drift_bound(adapter)
         drift_bounds = -B, B # TODO: maybe use a proper interval for this
         cache_key = (n, drift_bounds)
         cached = self.hoeffding_cache.get(cache_key)
