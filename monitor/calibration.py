@@ -133,9 +133,34 @@ class LipschitzConstantProvider:
         cls._transition_lipschitz_cache.clear()
 
     @classmethod
-    def set_drift_bound(cls, adapter: DynamicalSystemAdapter, value: float) -> None:
+    def _validate_overwrite(
+        cls,
+        existing_value: float | None,
+        new_value: float,
+        force: bool,
+        quantity: str,
+        cache_key: str,
+    ) -> None:
+        if existing_value is not None and new_value < existing_value and not force:
+            raise ValueError(
+                f"Refusing to decrease {quantity} for key {cache_key!r} "
+                f"from {existing_value} to {new_value} without force=True"
+            )
+
+    @classmethod
+    def set_drift_bound(
+        cls,
+        adapter: DynamicalSystemAdapter,
+        value: float,
+        *,
+        force: bool = False,
+    ) -> None:
         cls._load_if_needed()
         cache_key = cls._encode_key(adapter.bound_key())
+        existing_value = cls._precomputed_drift_bounds.get(cache_key)
+        if existing_value is None:
+            existing_value = cls._drift_bound_cache.get(cache_key)
+        cls._validate_overwrite(existing_value, value, force, "drift bound", cache_key)
         cls._drift_bound_cache[cache_key] = value
         cls._precomputed_drift_bounds[cache_key] = value
         cls._write_json()
@@ -145,9 +170,21 @@ class LipschitzConstantProvider:
         cls,
         adapter: DynamicalSystemAdapter,
         value: float,
+        *,
+        force: bool = False,
     ) -> None:
         cls._load_if_needed()
         cache_key = cls._encode_key(adapter.bound_key())
+        existing_value = cls._precomputed_transition_lipschitz.get(cache_key)
+        if existing_value is None:
+            existing_value = cls._transition_lipschitz_cache.get(cache_key)
+        cls._validate_overwrite(
+            existing_value,
+            value,
+            force,
+            "transition Wasserstein Lipschitz bound",
+            cache_key,
+        )
         cls._transition_lipschitz_cache[cache_key] = value
         cls._precomputed_transition_lipschitz[cache_key] = value
         cls._write_json()

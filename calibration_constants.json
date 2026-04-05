@@ -15,8 +15,9 @@
     "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":3.0,\"mean\":-1.0,\"sigma\":0.0}": 1.0,
     "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":3.0,\"mean\":0.2,\"sigma\":0.0}": 0.2,
     "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":3.0,\"mean\":1.0,\"sigma\":0.0}": 1.0,
-    "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":4.0,\"mean\":0.31,\"sigma\":0.07}": 0.9,
-    "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":5.0,\"mean\":0.29,\"sigma\":0.11}": 3.5,
+    "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":4.0,\"mean\":0.31,\"sigma\":0.07}": 0.5900000000000001,
+    "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":5.0,\"mean\":0.29,\"sigma\":0.11}": 0.8400000000000001,
+    "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":6.0,\"mean\":0.271,\"sigma\":0.019}": 0.385,
     "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":7.0,\"mean\":0.123,\"sigma\":0.456}": 3.3150000000000004
   },
   "transition_wasserstein_lipschitz": {
@@ -28,7 +29,8 @@
     "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":3.0,\"mean\":0.2,\"sigma\":0.0}": 1.0,
     "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":3.0,\"mean\":1.0,\"sigma\":0.0}": 1.0,
     "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":4.0,\"mean\":0.31,\"sigma\":0.07}": 1.0,
-    "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":5.0,\"mean\":0.29,\"sigma\":0.11}": 1.75,
+    "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":5.0,\"mean\":0.29,\"sigma\":0.11}": 1.0,
+    "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":6.0,\"mean\":0.271,\"sigma\":0.019}": 1.0,
     "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":7.0,\"mean\":0.123,\"sigma\":0.456}": 1.0
   }
 }

@@ -268,8 +268,6 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         return float(torch.linalg.norm(state1 - state2))
 
     def bound_key(self) -> Dict[str, Any]:
-        if not self.flip_inputs_prob_from == self.flip_inputs_prob_to == 0:
-            raise ValueError("TODO: bounds with flip prob")
         return {
             "adapter_class": type(self).__name__,
             "dt": float(self.dt),

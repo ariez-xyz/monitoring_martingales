@@ -39,9 +39,9 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         self.base_seed = int(base_seed)
         self.clamp_at_sigma = clamp_at_sigma
         self._done = False
+        self.reset(seed=self.base_seed)
         LipschitzConstantProvider.set_drift_bound(self, self._drift_bound())
         LipschitzConstantProvider.set_transition_wasserstein_lipschitz(self, 1.0)
-        self.reset(seed=self.base_seed)
 
     def reset(self, seed: Optional[int] = None):
         if seed is None:
