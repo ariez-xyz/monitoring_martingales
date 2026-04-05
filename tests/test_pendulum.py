@@ -256,6 +256,19 @@ def test_pendulum_endpoint_noise_iterator_rejects_nonzero_certificate_slope():
         next(adapter._noisy_transitions(n_episodes=1, max_steps=1))
 
 
+def test_pendulum_noisy_transitions_return_endpoints_plus_samples():
+    """The iterator should return endpoint successors plus sampled-noise successors."""
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+
+    torch.manual_seed(0)
+    adapter = NeuralCLBFPendulum(dt=0.1, noise_level=0.1)
+
+    current_state, next_states = next(adapter._noisy_transitions(n_episodes=1, max_steps=1, n_sampled_transitions=4))
+
+    assert current_state.shape == (adapter.dynamics.n_dims,)
+    assert next_states.shape == (6, adapter.dynamics.n_dims)
+
+
 def test_pendulum_step_appends_exactly_one_drift():
     """Each pendulum step should append exactly one realized drift."""
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum

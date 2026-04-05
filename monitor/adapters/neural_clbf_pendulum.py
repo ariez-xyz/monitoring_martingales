@@ -311,14 +311,15 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self,
         n_episodes: int = 5,
         max_steps: int = 20000,
+        n_sampled_transitions: int = 4,
     ) -> Generator[Tuple[torch.Tensor, torch.Tensor], None, None]:
         """Yield current state and noisy successor state batch.
 
         The clone advances using sampled control noise to explore realistic
         closed-loop states. At each visited state, the iterator emits the
-        current state together with the next states induced by the minimum and
-        maximum 1D control perturbations, which are used as conservative
-        endpoint proxies for estimating one-step bounds.
+        current state together with a batch of next states consisting of the
+        minimum and maximum 1D control perturbations plus a few additional
+        sampled-noise successors.
         """
         if self.certificate_slope != 0:
             raise ValueError("Certificate slope must be 0 when estimating drift bound.")
@@ -342,14 +343,17 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
                 with torch.no_grad():
                     f, g = pendulum_copy.dynamics.control_affine_dynamics(state_batch)
                     u_nominal = pendulum_copy._get_control(state_batch)
-                    noise_plus = torch.full((1, 1), pendulum_copy.noise_level, dtype=u_nominal.dtype)
-                    noise_minus = -noise_plus
-                    u_plus = u_nominal + noise_plus
-                    u_minus = u_nominal + noise_minus
-                    xdot_plus = f.squeeze(-1) + (g @ u_plus.unsqueeze(-1)).squeeze(-1)
-                    xdot_minus = f.squeeze(-1) + (g @ u_minus.unsqueeze(-1)).squeeze(-1)
-                    next_state_plus = pendulum_copy.state + pendulum_copy.dt * xdot_plus.squeeze(0)
-                    next_state_minus = pendulum_copy.state + pendulum_copy.dt * xdot_minus.squeeze(0)
+
+                    # 1. Compute states at noise endpoints
+                    def make_state(noise):
+                        u = u_nominal + noise
+                        xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
+                        return pendulum_copy.state + pendulum_copy.dt * xdot.squeeze(0)
+                    max_noise = torch.full((1, 1), pendulum_copy.noise_level, dtype=u_nominal.dtype)
+                    endpoint_states = torch.stack([make_state(noise) for noise in (max_noise, -max_noise)])
+
+                    # 2. Compute states with sampled noise using the adapter batch API
+                    sampled_next_states = pendulum_copy.sample(n_samples=n_sampled_transitions)
 
                 # Rollout the clone with noise sampled in the standard manner
                 with torch.no_grad():
@@ -357,7 +361,8 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
                     xdot_rollout = f.squeeze(-1) + (g @ u_rollout.unsqueeze(-1)).squeeze(-1)
                     next_state_rollout = pendulum_copy.state + pendulum_copy.dt * xdot_rollout.squeeze(0)
 
-                yield pendulum_copy.state, torch.stack([next_state_minus, next_state_plus])
+
+                yield pendulum_copy.state, torch.cat([endpoint_states, sampled_next_states], dim=0)
 
                 pendulum_copy.state = next_state_rollout
                 pendulum_copy._step_count += 1
