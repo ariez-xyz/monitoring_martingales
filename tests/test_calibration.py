@@ -1,4 +1,5 @@
 import json
+import math
 
 from monitor.calibration import LipschitzConstantEstimator, LipschitzConstantProvider
 from tests.fixtures import NormalIncrementAdapter
@@ -25,7 +26,7 @@ def test_estimator_computes_drift_bound_from_transition_batches():
         samples_per_step=4,
     )
 
-    assert abs(gamma - 0.2) < 1e-6
+    assert math.isclose(gamma, 0.2, abs_tol=1e-6)
 
 
 def test_estimator_computes_transition_wasserstein_lipschitz():
