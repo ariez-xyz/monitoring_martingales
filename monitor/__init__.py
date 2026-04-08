@@ -1,1 +1,1 @@
-from .monitors import NeuralCertificateMonitor, HypothesisTestingMonitor
+from .monitors import EstimationMonitor, HypothesisTestingMonitor

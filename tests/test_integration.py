@@ -23,15 +23,15 @@ def test_hypothesis_monitor_becomes_more_suspicious_under_input_flip_fault():
     nominal.reset(initial_state=initial_state)
     faulty.reset(initial_state=initial_state)
 
-    nominal_monitor = HypothesisTestingMonitor(nominal, delta=0.01)
-    faulty_monitor = HypothesisTestingMonitor(faulty, delta=0.01)
+    nominal_monitor = HypothesisTestingMonitor(delta=0.01)
+    faulty_monitor = HypothesisTestingMonitor(delta=0.01)
 
     nominal_max_e = 1.0
     faulty_max_e = 1.0
     faulty_rejected = False
 
     for step, ((nominal_verdict, nominal_info), (faulty_verdict, faulty_info)) in enumerate(
-        zip(nominal_monitor.run(), faulty_monitor.run()),
+        zip(nominal_monitor(nominal), faulty_monitor(faulty)),
         start=1,
     ):
         nominal_max_e = max(nominal_max_e, float(nominal_info["e_value"]))
@@ -49,4 +49,3 @@ def test_hypothesis_monitor_becomes_more_suspicious_under_input_flip_fault():
     assert faulty_rejected or faulty_max_e >= 2.0, (
         f"Expected strong suspicion under flip fault, got faulty_max_e={faulty_max_e}"
     )
-

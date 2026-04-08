@@ -10,9 +10,9 @@ def test_e_process_seed_is_1():
     E_0 = 1
     """
     adapter = NormalIncrementAdapter(mean=-1.0, sigma=0.0, initial_value=10.0)
-    monitor = HypothesisTestingMonitor(adapter=adapter, delta=0.1)
+    monitor = HypothesisTestingMonitor(delta=0.1)
 
-    assert monitor.E(0) == 1
+    assert monitor.E(0, adapter) == 1
     assert monitor.E_cache == [1]
 
 
@@ -24,10 +24,10 @@ def test_plugin_bet_matches_formula():
     """
     for mean in -1.0, 1.0:
         adapter = NormalIncrementAdapter(mean=mean, sigma=0.0, initial_value=10.0, max_steps=11)
-        monitor = HypothesisTestingMonitor(adapter=adapter, delta=0.1)
+        monitor = HypothesisTestingMonitor(delta=0.1)
 
-        results = list(monitor.run()) # Run monitor
-        beta = [monitor.beta(i) for i in range(len(monitor.Delta))]
+        results = list(monitor(adapter))
+        beta = [monitor.beta(i, adapter) for i in range(len(monitor.Delta))]
 
         assert len(monitor.Delta) == len(beta) == len(results)
 
@@ -44,15 +44,15 @@ def test_e_process_matches_product_formula():
     E_n=prod_{k=0}^{n-1} (1+ beta_k * Delta_k)
     """
     adapter = NormalIncrementAdapter(mean=1.0, sigma=0.0, initial_value=5.0, max_steps=5)
-    monitor = HypothesisTestingMonitor(adapter=adapter, delta=0.1)
+    monitor = HypothesisTestingMonitor(delta=0.1)
 
-    results = list(monitor.run()) # Run monitor
+    results = list(monitor(adapter))
 
     expected = 1.0
     for k in range(len(results)):
-        expected *= 1.0 + monitor.beta(k) * monitor.Delta[k]
+        expected *= 1.0 + monitor.beta(k, adapter) * monitor.Delta[k]
 
-    assert math.isclose(monitor.E(len(results)), expected)
+    assert math.isclose(monitor.E(len(results), adapter), expected)
 
 
 def test_monitor_refutes_when_e_value_crosses_threshold():
@@ -61,9 +61,9 @@ def test_monitor_refutes_when_e_value_crosses_threshold():
     """
     adapter = NormalIncrementAdapter(mean=1.0, sigma=0.0, initial_value=50.0, max_steps=50)
     delta = 0.2
-    monitor = HypothesisTestingMonitor(adapter=adapter, delta=delta)
+    monitor = HypothesisTestingMonitor(delta=delta)
 
-    results = list(monitor.run())
+    results = list(monitor(adapter))
 
     assert results, "Expected at least one monitoring step"
 

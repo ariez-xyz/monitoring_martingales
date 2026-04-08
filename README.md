@@ -47,16 +47,16 @@ This monitor is able to attest validity, but it additionally requires an estimat
 from monitor.adapters import NeuralCLBFPendulum
 from monitor.estimators import HistoryEstimator
 from monitor.weighting import UniformWeights
-from monitor import NeuralCertificateMonitor
+from monitor import EstimationMonitor
 
 # 1. Initialize the system and the monitor
 adapter = NeuralCLBFPendulum()
 weighting = UniformWeights(radius=10)  # window size = 2*radius+1
 estimator = HistoryEstimator(weighting, delta=0.01)
-monitor = NeuralCertificateMonitor(adapter, estimator)
+monitor = EstimationMonitor(estimator)
 
 # 2. Run the control/monitor loop
-for verdict, info in monitor.run():
+for verdict, info in monitor(adapter):
     print(verdict, info)
 ```
 
@@ -69,9 +69,9 @@ from monitor import HypothesisTestingMonitor
 from monitor.adapters import NeuralCLBFPendulum
 
 adapter = NeuralCLBFPendulum()
-monitor = HypothesisTestingMonitor(adapter=adapter, delta=0.01)
+monitor = HypothesisTestingMonitor(delta=0.01)
 
-for verdict, info in monitor.run():
+for verdict, info in monitor(adapter):
     print(verdict, info)
 ```
 
