@@ -9,6 +9,17 @@ class Monitor(ABC):
     def __call__(self, adapter: DynamicalSystemAdapter) -> Generator[Tuple[Literal["T","F","?"], Dict[Any, Any]], None, None]:
         pass
 
+    @abstractmethod
+    def _viz_item(self, item: Tuple[Literal["T","F","?"], Dict[Any, Any]]):
+        """
+        For example, pretty print confidence intervals.
+        """
+        pass
+
+    def viz(self, adapter: DynamicalSystemAdapter):
+        for item in self(adapter):
+            self._viz_item(item)
+
 
 class EstimationMonitor(Monitor):
     def __init__(self, estimator: Estimator):
@@ -26,6 +37,10 @@ class EstimationMonitor(Monitor):
                 step_idx += 1
         except KeyboardInterrupt:
             pass
+
+    def _viz_item(self, item: Tuple[Literal["T","F","?"], Dict[Any, Any]]):
+        verdict, info = item
+        print(f"{verdict} {info['ci']}")
 
 
 class HypothesisTestingMonitor(Monitor):
@@ -111,3 +126,7 @@ class HypothesisTestingMonitor(Monitor):
 
         except KeyboardInterrupt:
             pass
+
+    def _viz_item(self, item: Tuple[Literal["T","F","?"], Dict[Any, Any]]):
+        verdict, info = item
+        print(f"{verdict} {info['e_value']}")
