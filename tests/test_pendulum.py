@@ -72,6 +72,23 @@ def test_pendulum_explicit_state_queries_do_not_reuse_held_control():
     )
 
 
+def test_pendulum_sample_with_zero_noise_matches_expected_next_state():
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+
+    adapter = NeuralCLBFPendulum(dt=0.01, noise_level=0.1)
+    state = torch.tensor([1.0, 0.5])
+    adapter.reset(initial_state=state)
+
+    expected_next = adapter.get_expected_next_state(state)
+    sampled_next = adapter.sample(state, n_samples=4, noise_level=0.0)
+
+    assert sampled_next.shape == (4, 2)
+    assert torch.allclose(
+        sampled_next,
+        expected_next.unsqueeze(0).expand_as(sampled_next),
+    )
+
+
 def test_pendulum_held_control_rejects_batched_queries():
     """Held-control path is only defined for the single live state."""
     import pytest

@@ -92,16 +92,27 @@ class DynamicalSystemAdapter(ABC):
         pass
 
     @abstractmethod
-    def sample(self, state: Optional[torch.Tensor] = None, n_samples: int = 1) -> torch.Tensor:
+    def sample(
+        self,
+        state: Optional[torch.Tensor] = None,
+        n_samples: int = 1,
+        include_extremes: bool = False,
+        noise_level: float = -1.0,
+    ) -> torch.Tensor:
         """
         Samples 'n_samples' next states for given or current state.
 
         Args:
             state: Tensor of shape (state_dim)
             n_samples: Number of stochastic samples to draw
+            include_extremes: If True, include adapter-specific extreme successor
+                states when the noise model has meaningful bounded extremes.
+            noise_level: Per-call noise override. Negative values use the
+                adapter's configured noise level.
 
         Returns:
-            Tensor of shape (n_samples, state_dim)
+            Tensor of shape `(batch_size, state_dim)`, where `batch_size` is
+            typically `n_samples` and may be larger if `include_extremes=True`.
         """
         pass
 

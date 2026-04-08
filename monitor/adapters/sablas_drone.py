@@ -142,25 +142,49 @@ class SablasDrone(DynamicalSystemAdapter):
 
         return torch.from_numpy(self.state).float()
 
-    def sample(self, state: Optional[torch.Tensor] = None, n_samples: int = 1) -> torch.Tensor:
+    def sample(
+        self,
+        state: Optional[torch.Tensor] = None,
+        n_samples: int = 1,
+        include_extremes: bool = False,
+        noise_level: float = -1.0,
+    ) -> torch.Tensor:
         resolved_state_np = self.resolve_state(state).numpy()
         if state is None:
             u = self._peek_control_input(resolved_state_np)
         else:
             u = self._compute_control_input(resolved_state_np)
         dsdt = self.env.uncertain_dynamics(resolved_state_np, u)
+        effective_noise_level = self.noise_level if noise_level < 0 else float(noise_level)
+
+        if noise_level >= 0: raise ValueError("sablas drone has its own noise, cannot override noise level")
 
         next_states = []
+        if include_extremes and effective_noise_level > 0:
+            for sign in (1.0, -1.0):
+                extreme_noise = sign * np.ones((8,), dtype=resolved_state_np.dtype) * effective_noise_level
+                extreme_noise[:3] = 0
+                next_state_np = resolved_state_np + (dsdt + extreme_noise) * self.env.dt
+                next_state_np[3:6] = np.clip(next_state_np[3:6], -self.env.max_speed, self.env.max_speed)
+                next_state_np[6:] = np.clip(next_state_np[6:], -self.env.max_theta, self.env.max_theta)
+                next_states.append(torch.from_numpy(next_state_np))
+
         for _ in range(n_samples):
-            if np.random.uniform() < 0.05:
-                noise = np.random.normal(size=(8,)) * self.env.noise_std
+            if effective_noise_level <= 0:
+                noise = np.zeros((8,), dtype=resolved_state_np.dtype)
+            elif np.random.uniform() < 0.05:
+                noise = np.random.normal(size=(8,)) * effective_noise_level
             else:
-                noise = self.env.noise.copy()
+                scale = 0.0 if self.noise_level <= 0 else (effective_noise_level / self.noise_level)
+                noise = self.env.noise.copy() * scale
             noise[:3] = 0
             next_state_np = resolved_state_np + (dsdt + noise) * self.env.dt
             next_state_np[3:6] = np.clip(next_state_np[3:6], -self.env.max_speed, self.env.max_speed)
             next_state_np[6:] = np.clip(next_state_np[6:], -self.env.max_theta, self.env.max_theta)
             next_states.append(torch.from_numpy(next_state_np))
+
+        if not next_states:
+            return torch.empty((0, self.get_state_dim()), dtype=torch.float32)
 
         return torch.stack(next_states).float()
 
@@ -185,7 +209,8 @@ class SablasDrone(DynamicalSystemAdapter):
         }
 
     def noisy_transitions(self, samples: int = 4) -> Tuple[torch.Tensor, torch.Tensor]:
-        raise NotImplementedError("noisy_transitions is not implemented yet for SablasDrone")
+        current_state = self.resolve_state().clone()
+        return current_state, self.sample(n_samples=samples, include_extremes=True)
 
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         resolved_state_np = self.resolve_state(state).numpy()

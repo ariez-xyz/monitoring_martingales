@@ -56,13 +56,14 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
     def done(self) -> bool:
         return self.step_count >= self.max_steps or self._done
 
-    def _draw_increments(self, n: int) -> torch.Tensor:
+    def _draw_increments(self, n: int, sigma: Optional[float] = None) -> torch.Tensor:
+        effective_sigma = self.sigma if sigma is None else float(sigma)
         mean = torch.tensor(float(self.mean), dtype=torch.float32)
-        std = torch.tensor(float(self.sigma), dtype=torch.float32)
+        std = torch.tensor(float(effective_sigma), dtype=torch.float32)
         increments = mean + std * torch.randn(n, generator=self._rng)
-        if self.sigma > 0:
-            lower = self.mean - self.clamp_at_sigma * self.sigma
-            upper = self.mean + self.clamp_at_sigma * self.sigma
+        if effective_sigma > 0:
+            lower = self.mean - self.clamp_at_sigma * effective_sigma
+            upper = self.mean + self.clamp_at_sigma * effective_sigma
             increments = torch.clamp(increments, lower, upper)
         return increments
 
@@ -105,12 +106,29 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
     def get_drift_history(self) -> torch.Tensor:
         return torch.tensor(self.drift_history, dtype=torch.float32)
 
-    def sample(self, state: Optional[torch.Tensor] = None, n_samples: int = 1) -> torch.Tensor:
+    def sample(
+        self,
+        state: Optional[torch.Tensor] = None,
+        n_samples: int = 1,
+        include_extremes: bool = False,
+        noise_level: float = -1.0,
+    ) -> torch.Tensor:
         if state is None:
             state = self.state
         if state.dim() == 1:
             state = state.unsqueeze(0)
-        increments = self._draw_increments(n_samples).unsqueeze(-1)
+        effective_sigma = self.sigma if noise_level < 0 else float(noise_level)
+        increments = []
+        if include_extremes and effective_sigma > 0:
+            lo = self.mean - self.clamp_at_sigma * effective_sigma
+            hi = self.mean + self.clamp_at_sigma * effective_sigma
+            increments.extend([torch.tensor([[lo]]), torch.tensor([[hi]])])
+        if n_samples > 0:
+            sampled = self._draw_increments(n_samples, sigma=effective_sigma)
+            increments.append(sampled.unsqueeze(-1))
+        if not increments:
+            return state[:0].clone()
+        increments = torch.cat(increments, dim=0)
         return state[0].unsqueeze(0) + increments
 
     def noisy_transitions(self, samples: int = 4) -> Tuple[torch.Tensor, torch.Tensor]:

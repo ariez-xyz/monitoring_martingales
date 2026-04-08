@@ -172,10 +172,17 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
 
         return self.state.clone()
 
-    def sample(self, state: Optional[torch.Tensor] = None, n_samples: int = 1) -> torch.Tensor:
+    def sample(
+        self,
+        state: Optional[torch.Tensor] = None,
+        n_samples: int = 1,
+        include_extremes: bool = False,
+        noise_level: float = -1.0,
+    ) -> torch.Tensor:
         """Sample n next states (with noise if configured)."""
         resolved_state = self.resolve_state(state)
         state_batch = resolved_state.unsqueeze(0)
+        noise_level = self.noise_level if noise_level < 0 else float(noise_level)
 
         # For the live state, mirror the currently held control. For
         # hypothetical queries, recompute control at the provided state.
@@ -184,24 +191,35 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         with torch.no_grad():
             f, g = self.dynamics.control_affine_dynamics(state_batch)
             u_nominal = self._get_control(state_batch, use_hold=use_hold)
+            u_samples = []
 
-            # Draw control noise independently per sample.
-            u_samples = u_nominal.expand(n_samples, -1) + self._sample_control_noise(
-                n_samples=n_samples
-            )
+            if include_extremes and noise_level > 0:
+                extreme_noise = torch.full((1, 1), noise_level, dtype=u_nominal.dtype)
+                u_samples.extend([u_nominal + extreme_noise, u_nominal - extreme_noise])
 
-            f_samples = f.squeeze(-1).expand(n_samples, -1)
-            g_samples = g.expand(n_samples, -1, -1)
+            if n_samples > 0:
+                sampled_noise = self._sample_control_noise(n_samples, noise_level)
+                sampled_controls = u_nominal.expand(n_samples, -1) + sampled_noise
+                u_samples.append(sampled_controls)
+
+            if not u_samples:
+                return resolved_state.unsqueeze(0).clone()[:0]
+
+            u_samples = torch.cat(u_samples, dim=0)
+
+            f_samples = f.squeeze(-1).expand(u_samples.shape[0], -1)
+            g_samples = g.expand(u_samples.shape[0], -1, -1)
             xdot_samples = f_samples + (g_samples @ u_samples.unsqueeze(-1)).squeeze(-1)
             next_states = resolved_state.unsqueeze(0) + self.dt * xdot_samples
 
         return next_states
 
-    def _sample_control_noise(self, n_samples: int) -> torch.Tensor:
+    def _sample_control_noise(self, n_samples: int, noise_level: Optional[float] = None) -> torch.Tensor:
         """Sample additive control noise in control space."""
-        if self.noise_level <= 0:
+        noise_level = self.noise_level if noise_level is None else float(noise_level)
+        if noise_level <= 0:
             return torch.zeros(n_samples, self.dynamics.n_controls)
-        return (2.0 * torch.rand(n_samples, 1) - 1.0) * self.noise_level
+        return (2.0 * torch.rand(n_samples, 1) - 1.0) * noise_level
 
     def _get_control(self, state_batch: torch.Tensor, use_hold: bool = False) -> torch.Tensor:
         """Return the controller output for this query.
@@ -266,21 +284,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
     def noisy_transitions(self, samples: int = 4) -> Tuple[torch.Tensor, torch.Tensor]:
         """Return the current state and a representative batch of noisy successors."""
         current_state = self.state.clone()
-        state_batch = current_state.unsqueeze(0)
-        with torch.no_grad():
-            f, g = self.dynamics.control_affine_dynamics(state_batch)
-            u_nominal = self._get_control(state_batch, use_hold=True)
-
-            def make_state(noise: torch.Tensor) -> torch.Tensor:
-                u = u_nominal + noise
-                xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
-                return current_state + self.dt * xdot.squeeze(0)
-
-            max_noise = torch.full((1, 1), self.noise_level, dtype=u_nominal.dtype)
-            endpoint_states = torch.stack([make_state(noise) for noise in (max_noise, -max_noise)])
-            sampled_next_states = self.sample(n_samples=samples)
-
-        return current_state, torch.cat([endpoint_states, sampled_next_states], dim=0)
+        return current_state, self.sample(n_samples=samples, include_extremes=True)
 
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """

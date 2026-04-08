@@ -42,6 +42,20 @@ def test_normal_increment_adapter_respects_reward_bounds_and_expectation():
     with pytest.raises(ValueError, match="sigma must be nonnegative"):
         NormalIncrementAdapter(mean=0.0, sigma=-1.0, initial_value=1.0)
 
+
+def test_normal_increment_sample_with_zero_noise_matches_expected_next_state():
+    adapter = NormalIncrementAdapter(mean=-0.2, sigma=0.1, initial_value=3.0)
+    cur_state = adapter.state.clone()
+
+    expected_next = adapter.get_expected_next_state(cur_state)
+    sampled_next = adapter.sample(cur_state, n_samples=4, noise_level=0.0)
+
+    assert sampled_next.shape == (4, 1)
+    assert torch.allclose(
+        sampled_next,
+        expected_next.unsqueeze(0).expand_as(sampled_next),
+    )
+
 def test_normal_increment_adapter_terminates():
     adapter = NormalIncrementAdapter(mean=-0.1, sigma=0.5, initial_value=20, clamp_at_sigma=3.0)
     while not adapter.done():
