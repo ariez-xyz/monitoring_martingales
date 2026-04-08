@@ -33,17 +33,13 @@ def test_estimator_computes_transition_wasserstein_lipschitz():
     estimator = LipschitzConstantEstimator()
     adapter_factory = lambda: NormalIncrementAdapter(mean=0.2, sigma=0.0, initial_value=10.0)
 
-    try:
-        estimator.estimate_transition_wasserstein_lipschitz(
-            adapter_factory,
-            n_episodes=5,
-            max_steps=30,
-            percentile=100.0,
-            samples_per_step=4,
-        )
-        assert False, "Expected transition Wasserstein estimation to be unimplemented"
-    except NotImplementedError:
-        pass
+    estimated_rho = estimator.estimate_transition_wasserstein_lipschitz(
+        adapter_factory,
+        n_episodes=10,
+    )
+
+    # rho = 1 since NormalIncrementAdapter distribution never changes.
+    assert math.isclose(estimated_rho, 1) 
 
 
 def test_provider_reads_persisted_values_from_real_json():

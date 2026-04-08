@@ -17,12 +17,19 @@ class LipschitzConstantEstimator:
     def estimate_drift_bound(
         self,
         adapter_factory: AdapterFactory,
-        n_episodes: int = 5,
-        max_steps: int = 20000,
-        percentile: float = 99.999,
-        samples_per_step: int = 4,
+        n_episodes: int = 500,
+        max_steps: int = 20,
+        percentile: float = 100.0,
+        samples_per_step: int = 8,
     ) -> float:
-        """Estimate a conservative one-step drift bound."""
+        """Estimate a conservative one-step drift bound.
+
+        Coverage note:
+        For rollout-based calibration, prefer increasing `n_episodes` over
+        increasing `max_steps`. Longer rollouts concentrate samples near the
+        target/stable region and underexplore the broader state space, while
+        more resets tend to improve coverage of the operating region.
+        """
         step_bound_samples = []
         adapter = adapter_factory()
 
@@ -47,43 +54,53 @@ class LipschitzConstantEstimator:
     def estimate_transition_wasserstein_lipschitz(
         self,
         adapter_factory: AdapterFactory,
-        n_episodes: int = 5,
-        max_steps: int = 20000,
-        percentile: float = 99.999,
-        samples_per_step: int = 4,
+        n_episodes: int = 500,
+        max_steps: int = 20,
+        percentile: float = 100.0,
     ) -> float:
-        """Estimate W1-Lipschitz bound for one-step kernels."""
+        """Estimate W1-Lipschitz bound for one-step kernels.
+
+        Coverage note:
+        For rollout-based calibration, prefer increasing `n_episodes` over
+        increasing `max_steps`. Longer rollouts concentrate samples near the
+        target/stable region and underexplore the broader state space, while
+        more resets tend to improve coverage of the operating region.
+        """
         wasserstein_distances = []
         adapter = adapter_factory()
 
         for _ in range(n_episodes):
             adapter.reset()
             for _ in range(max_steps):
-                current_state = adapter.get_state()
-                next_states = adapter.sample(n_samples=samples_per_step, include_extremes=True)
+                # Wasserstein distance for **ZERO-MEAN** distributions reduces to
+                # ratio of distances, hence our procedure:
 
-                for next_state in next_states:
-                    state_distance = adapter.distance(current_state, next_state)
-                    if state_distance <= 0:
-                        continue
-                    current_state_center = adapter.sample(current_state, n_samples=1, noise_level=0.0).squeeze(0)
-                    next_state_center = adapter.sample(next_state, n_samples=1, noise_level=0.0).squeeze(0)
-                    kernel_distance = adapter.distance(current_state_center, next_state_center)
-                    # Wasserstein distance for **ZERO-MEAN** distributions reduces to
-                    # ratio of distances
-                    wasserstein_distances.append(kernel_distance / state_distance)
+                # 1. Sample two nearby states
+                s1, s2 = adapter.sample(n_samples=2, noise_level=0.1)
+
+                # 2. Get expected successors (noise_level=0 is expectation for zero mean)
+                t1 = adapter.sample(s1, noise_level=0)
+                t2 = adapter.sample(s2, noise_level=0) 
+
+                # 3. Compute distances
+                state_distance = adapter.distance(s1, s2)
+                succ_distance = adapter.distance(t1, t2)
+
+                # 4. Compute empirical bound rho:
+                #      W1(P(s1), P(s2))             <= rho * d(s1, s2)
+                # <=>  W1(P(s1), P(s2)) / d(s1, s2) <= rho
+                # <=>         d(t1, t2) / d(s1, s2) <= rho
+                # (the latter simplification holds because noise laws are translated copies)
+                wasserstein_distances.append(succ_distance / state_distance)
 
                 adapter.step()
                 if adapter.done():
                     break
 
         if not wasserstein_distances:
-            raise ValueError(
-                "No non-zero state distances were collected while estimating Wasserstein Lipschitz bound"
-            )
+            raise ValueError("No non-zero state distances were collected while estimating Wasserstein Lipschitz bound")
 
         rho = float(np.percentile(wasserstein_distances, percentile))
-        raise NotImplementedError
         return max(rho, 1e-6)
 
 
