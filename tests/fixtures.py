@@ -53,6 +53,9 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         self.state_history: List[torch.Tensor] = [self.state.clone()]
         self.drift_history: List[float] = []
 
+    def get_state(self) -> torch.Tensor:
+        return self.state.clone()
+
     def done(self) -> bool:
         return self.step_count >= self.max_steps or self._done
 

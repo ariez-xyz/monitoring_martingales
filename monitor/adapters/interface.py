@@ -82,6 +82,16 @@ class DynamicalSystemAdapter(ABC):
         pass
 
     @abstractmethod
+    def get_state(self) -> torch.Tensor:
+        """
+        Return the current state.
+
+        Returns:
+            Tensor of shape (state_dim) representing current state.
+        """
+        pass
+
+    @abstractmethod
     def get_state_history(self) -> torch.Tensor:
         """
         Return the history of states.
@@ -187,9 +197,5 @@ class DynamicalSystemAdapter(ABC):
         """Returns the provided state tensor, or falls back to self.state if no state is provided."""
         if state is not None: 
             return state
-        elif hasattr(self, 'state') and self.state is not None:  # type: ignore
-            if isinstance(self.state, np.ndarray):               # type: ignore
-                return torch.from_numpy(self.state).float()      # type: ignore
-            return self.state                                    # type: ignore
-        else:
-            raise RuntimeError("No state provided and object has no valid state attribute")
+        return self.get_state()
+

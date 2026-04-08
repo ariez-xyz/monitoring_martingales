@@ -105,6 +105,10 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         self._monitor_reject_step = None
         self.flip_inputs_state = False
 
+    def get_state(self) -> torch.Tensor:
+        """Return the current state."""
+        return self.state.clone()
+
     def done(self) -> bool:
         """Check if simulation is complete (goal reached)."""
         # Goal: near origin

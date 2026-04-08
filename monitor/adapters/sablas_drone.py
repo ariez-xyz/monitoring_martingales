@@ -79,6 +79,10 @@ class SablasDrone(DynamicalSystemAdapter):
         self.is_done = False
         self._step_count = 0
 
+    def get_state(self) -> torch.Tensor:
+        """Return the current state."""
+        return torch.from_numpy(self.state).float()
+
     def _compute_control_input(self, state: np.ndarray) -> np.ndarray:
         u_nominal = self.env.nominal_controller(state, self.goal)
         u_tensor = self.controller(
