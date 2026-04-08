@@ -4,25 +4,24 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Dict
 
-import numpy as np
 import torch
 
 from .adapters import DynamicalSystemAdapter
 
 AdapterFactory = Callable[[], DynamicalSystemAdapter]
 
-class LipschitzConstantEstimator:
-    """Estimate calibration constants from rollout data."""
 
-    def estimate_drift_bound(
+class LipschitzConstantSampler:
+    """Collect rollout samples used to calibrate adapter constants."""
+
+    def sample_drift_bounds(
         self,
         adapter_factory: AdapterFactory,
         n_episodes: int = 500,
         max_steps: int = 20,
-        percentile: float = 100.0,
         samples_per_step: int = 8,
-    ) -> float:
-        """Estimate a conservative one-step drift bound.
+    ) -> list[float]:
+        """Collect per-step drift-bound samples from rollout batches.
 
         Coverage note:
         For rollout-based calibration, prefer increasing `n_episodes` over
@@ -30,7 +29,7 @@ class LipschitzConstantEstimator:
         target/stable region and underexplore the broader state space, while
         more resets tend to improve coverage of the operating region.
         """
-        step_bound_samples = []
+        step_bound_samples: list[float] = []
         adapter = adapter_factory()
 
         for _ in range(n_episodes):
@@ -44,21 +43,21 @@ class LipschitzConstantEstimator:
                 if adapter.done():
                     break
 
-        if not step_bound_samples:
-            raise ValueError("No rollout samples were collected while estimating drift bound")
+        return step_bound_samples
 
-        gamma = float(np.percentile(step_bound_samples, percentile))
-        return max(gamma, 1e-6)
-
-
-    def estimate_transition_wasserstein_lipschitz(
+    def sample_transition_wasserstein_ratios(
         self,
         adapter_factory: AdapterFactory,
         n_episodes: int = 500,
         max_steps: int = 20,
-        percentile: float = 100.0,
-    ) -> float:
-        """Estimate W1-Lipschitz bound for one-step kernels.
+    ) -> list[float]:
+        """Collect rollout-local transition Wasserstein ratio samples.
+
+        This uses the rollout-local heuristic currently documented in the repo:
+        sample two nearby states from the current transition law, then compare the
+        distance between their zero-noise successors to the distance between the
+        states themselves. This is intended only for adapters whose transition
+        laws are translated copies of a common noise family.
 
         Coverage note:
         For rollout-based calibration, prefer increasing `n_episodes` over
@@ -66,7 +65,7 @@ class LipschitzConstantEstimator:
         target/stable region and underexplore the broader state space, while
         more resets tend to improve coverage of the operating region.
         """
-        wasserstein_distances = []
+        wasserstein_ratios: list[float] = []
         adapter = adapter_factory()
 
         for _ in range(n_episodes):
@@ -85,23 +84,21 @@ class LipschitzConstantEstimator:
                 # 3. Compute distances
                 state_distance = adapter.distance(s1, s2)
                 succ_distance = adapter.distance(t1, t2)
+                if state_distance <= 0:
+                    continue
 
                 # 4. Compute empirical bound rho:
                 #      W1(P(s1), P(s2))             <= rho * d(s1, s2)
                 # <=>  W1(P(s1), P(s2)) / d(s1, s2) <= rho
                 # <=>         d(t1, t2) / d(s1, s2) <= rho
                 # (the latter simplification holds because noise laws are translated copies)
-                wasserstein_distances.append(succ_distance / state_distance)
+                wasserstein_ratios.append(succ_distance / state_distance)
 
                 adapter.step()
                 if adapter.done():
                     break
 
-        if not wasserstein_distances:
-            raise ValueError("No non-zero state distances were collected while estimating Wasserstein Lipschitz bound")
-
-        rho = float(np.percentile(wasserstein_distances, percentile))
-        return max(rho, 1e-6)
+        return wasserstein_ratios
 
 
 class LipschitzConstantProvider:

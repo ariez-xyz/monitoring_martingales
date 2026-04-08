@@ -1,7 +1,7 @@
 import json
 import math
 
-from monitor.calibration import LipschitzConstantEstimator, LipschitzConstantProvider
+from monitor.calibration import LipschitzConstantSampler, LipschitzConstantProvider
 from tests.fixtures import NormalIncrementAdapter
 
 
@@ -15,28 +15,29 @@ def _restore_fixture_bounds(adapter: NormalIncrementAdapter) -> None:
 
 
 def test_estimator_computes_drift_bound_from_transition_batches():
-    estimator = LipschitzConstantEstimator()
+    sampler = LipschitzConstantSampler()
     adapter_factory = lambda: NormalIncrementAdapter(mean=0.2, sigma=0.0, initial_value=10.0)
 
-    gamma = estimator.estimate_drift_bound(
+    samples = sampler.sample_drift_bounds(
         adapter_factory,
         n_episodes=5,
         max_steps=30,
-        percentile=100.0,
         samples_per_step=4,
     )
 
+    gamma = max(samples)
     assert math.isclose(gamma, 0.2, abs_tol=1e-6)
 
 
 def test_estimator_computes_transition_wasserstein_lipschitz():
-    estimator = LipschitzConstantEstimator()
+    sampler = LipschitzConstantSampler()
     adapter_factory = lambda: NormalIncrementAdapter(mean=0.2, sigma=0.0, initial_value=10.0)
 
-    estimated_rho = estimator.estimate_transition_wasserstein_lipschitz(
+    samples = sampler.sample_transition_wasserstein_ratios(
         adapter_factory,
         n_episodes=10,
     )
+    estimated_rho = max(samples)
 
     # rho = 1 since NormalIncrementAdapter distribution never changes.
     assert math.isclose(estimated_rho, 1) 

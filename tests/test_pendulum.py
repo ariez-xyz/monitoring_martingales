@@ -111,7 +111,8 @@ def test_pendulum_drift_bound_orders_widely_separated_timesteps():
     3. A much larger dt gives a larger bound
     """
     import time
-    from monitor.calibration import LipschitzConstantEstimator
+    import numpy as np
+    from monitor.calibration import LipschitzConstantSampler
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
 
     print("\n--- Pendulum Drift Bound Ordering Test ---")
@@ -139,15 +140,15 @@ def test_pendulum_drift_bound_orders_widely_separated_timesteps():
     adapter_small_dt = NeuralCLBFPendulum(dt=0.001)
     gamma_small = LipschitzConstantProvider.get_drift_bound(adapter_small_dt)
 
-    # Estimate a larger dt value inline through the new estimator path.
-    estimator = LipschitzConstantEstimator()
-    gamma_large = estimator.estimate_drift_bound(
+    # Estimate a larger dt value inline through the new sampler path.
+    sampler = LipschitzConstantSampler()
+    gamma_large_samples = sampler.sample_drift_bounds(
         lambda: NeuralCLBFPendulum(dt=0.1, noise_level=0.0),
         n_episodes=20,
         max_steps=100, # large dt doesn't need many steps
-        percentile=100.0,
         samples_per_step=4,
     )
+    gamma_large = max(gamma_large_samples)
 
     print(f"  dt=0.001: gamma = {gamma_small:.4f}")
     print(f"  dt=0.1:  gamma = {gamma_large:.4f}")
@@ -234,7 +235,7 @@ def test_pendulum_drift_sign_convention():
 
 def test_pendulum_empirical_drift_bound_estimation_does_not_mutate_live_state():
     """Empirical drift-bound estimation should not disturb the live adapter rollout."""
-    from monitor.calibration import LipschitzConstantEstimator
+    from monitor.calibration import LipschitzConstantSampler
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
 
     adapter = NeuralCLBFPendulum(dt=0.1, noise_level=0.0)
@@ -254,12 +255,13 @@ def test_pendulum_empirical_drift_bound_estimation_does_not_mutate_live_state():
         None if adapter._cached_control is None else adapter._cached_control.clone()
     )
 
-    estimator = LipschitzConstantEstimator()
-    gamma = estimator.estimate_drift_bound(
+    sampler = LipschitzConstantSampler()
+    gamma_samples = sampler.sample_drift_bounds(
         lambda: NeuralCLBFPendulum(dt=0.1, noise_level=0.0),
         n_episodes=1,
         max_steps=2,
     )
+    gamma = max(gamma_samples)
 
     assert gamma > 0 # type:ignore
     assert torch.allclose(adapter.state, state_before)
