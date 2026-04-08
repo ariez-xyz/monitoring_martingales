@@ -152,17 +152,20 @@ class SamplingEstimator(Estimator):
 
 class AnalyticEstimator(Estimator):
     """
-    Computes E[R] ≈ V(E[Y]) - V(x) - α(V(x)) using analytic expected next state.
+    Computes E[R] ≈ V(E[Y]) - V(x) - α(V(x)) using zero-noise one-step sampling.
 
-    This exploits the fact that for many systems, Jensen's gap is small:
-    V(E[Y]) ≈ E[V(Y)], so we can compute expected drift without Monte Carlo.
+    IMPORTANT CAVEATS:
 
-    Requires the adapter to implement get_expected_next_state().
+    1. Zero-noise is assumed to correspond to the expected next state. This holds 
+       for zero-mean noise.
+    2. Assumes that Jensen's gap is negligible: V(E[Y]) ≈ E[V(Y)], so we can 
+        compute expected drift without Monte Carlo sampling.
+
     Returns a degenerate CI (point estimate) since there's no sampling variance.
     """
 
     def __call__(self, adapter):
-        expected_next_state = adapter.get_expected_next_state()
+        expected_next_state = adapter.sample(n_samples=1, noise_level=0.0).squeeze(0)
         # unsqueeze: get_drift expects batched input
         expected_next_state = expected_next_state.unsqueeze(0)
         drift = float(adapter.get_drift(expected_next_state)) # V(E[Y])

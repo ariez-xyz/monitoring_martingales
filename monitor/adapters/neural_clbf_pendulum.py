@@ -285,25 +285,6 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             "noise_level": float(self.noise_level),
         }
 
-    def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Compute E[Y] analytically.
-
-        For deterministic dynamics with zero-mean noise:
-        E[Y] = x + dt * (f + g @ u)
-        """
-        resolved_state = self.resolve_state(state)
-        state_batch = resolved_state.unsqueeze(0)
-        use_hold = state is None
-
-        with torch.no_grad():
-            f, g = self.dynamics.control_affine_dynamics(state_batch)
-            u = self._get_control(state_batch, use_hold=use_hold)
-            xdot = f.squeeze(-1) + (g @ u.unsqueeze(-1)).squeeze(-1)
-            expected_next = resolved_state + self.dt * xdot.squeeze(0)
-
-        return expected_next
-
     def _visualize(self):
         """Render current state with multi-panel visualization."""
         import matplotlib.pyplot as plt

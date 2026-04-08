@@ -21,8 +21,8 @@ def test_pendulum_reset_seed_is_deterministic():
     assert not torch.allclose(first, third)
 
 
-def test_pendulum_flip_fault_affects_sampling_and_expected_next_state():
-    """Flip fault mode should be reflected by sample() and get_expected_next_state()."""
+def test_pendulum_flip_fault_affects_zero_noise_sampling():
+    """Flip fault mode should be reflected by zero-noise one-step sampling."""
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
 
     torch.manual_seed(0)
@@ -30,11 +30,11 @@ def test_pendulum_flip_fault_affects_sampling_and_expected_next_state():
     state = torch.tensor([1.0, 0.5])
     adapter.reset(initial_state=state)
 
-    nominal_next = adapter.get_expected_next_state(state)
+    nominal_next = adapter.sample(state, n_samples=1, noise_level=0.0).squeeze(0)
     nominal_samples = adapter.sample(state, n_samples=4)
 
     adapter.flip_inputs_state = True
-    flipped_next = adapter.get_expected_next_state(state)
+    flipped_next = adapter.sample(state, n_samples=1, noise_level=0.0).squeeze(0)
     flipped_samples = adapter.sample(state, n_samples=4)
 
     assert nominal_samples.shape == (4, 2)
@@ -42,7 +42,7 @@ def test_pendulum_flip_fault_affects_sampling_and_expected_next_state():
     assert torch.allclose(nominal_samples, nominal_next.unsqueeze(0).expand_as(nominal_samples))
     assert torch.allclose(flipped_samples, flipped_next.unsqueeze(0).expand_as(flipped_samples))
     assert not torch.allclose(nominal_next, flipped_next), (
-        "Expected flip fault to change one-step dynamics used by sample()/get_expected_next_state()"
+        "Expected flip fault to change one-step dynamics used by sample()"
     )
 
 
@@ -56,10 +56,10 @@ def test_pendulum_explicit_state_queries_do_not_reuse_held_control():
     adapter.reset(initial_state=current_state)
 
     # Prime the held-control cache using the live state.
-    _ = adapter.get_expected_next_state()
+    _ = adapter.sample(n_samples=1, noise_level=0.0)
 
-    live_next = adapter.get_expected_next_state()
-    queried_next = adapter.get_expected_next_state(other_state)
+    live_next = adapter.sample(n_samples=1, noise_level=0.0).squeeze(0)
+    queried_next = adapter.sample(other_state, n_samples=1, noise_level=0.0).squeeze(0)
     queried_samples = adapter.sample(other_state, n_samples=3)
 
     assert queried_samples.shape == (3, 2)
@@ -79,7 +79,7 @@ def test_pendulum_sample_with_zero_noise_matches_expected_next_state():
     state = torch.tensor([1.0, 0.5])
     adapter.reset(initial_state=state)
 
-    expected_next = adapter.get_expected_next_state(state)
+    expected_next = adapter.sample(state, n_samples=1, noise_level=0.0).squeeze(0)
     sampled_next = adapter.sample(state, n_samples=4, noise_level=0.0)
 
     assert sampled_next.shape == (4, 2)

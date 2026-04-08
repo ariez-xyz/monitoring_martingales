@@ -155,12 +155,5 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         )
         return max(abs(lo), abs(hi))
 
-    def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
-        if state is None:
-            state = self.state
-        if state.dim() == 1:
-            state = state.unsqueeze(0)
-        return state[0] + float(self.mean)
-
 def check_close(a: torch.Tensor, b: torch.Tensor, msg: str) -> None:
     assert torch.allclose(a, b, atol=1e-6, rtol=1e-6), msg

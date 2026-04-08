@@ -66,8 +66,8 @@ class LipschitzConstantEstimator:
                     state_distance = adapter.distance(current_state, next_state)
                     if state_distance <= 0:
                         continue
-                    current_state_center = adapter.get_expected_next_state(current_state)
-                    next_state_center = adapter.get_expected_next_state(next_state)
+                    current_state_center = adapter.sample(current_state, n_samples=1, noise_level=0.0).squeeze(0)
+                    next_state_center = adapter.sample(next_state, n_samples=1, noise_level=0.0).squeeze(0)
                     kernel_distance = adapter.distance(current_state_center, next_state_center)
                     # Wasserstein distance for **ZERO-MEAN** distributions reduces to
                     # ratio of distances

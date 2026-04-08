@@ -159,28 +159,6 @@ class DynamicalSystemAdapter(ABC):
         """
         pass
 
-    def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Computes E[Y] where Y ~ P(x) is the next state analytically.
-
-        This requires knowledge of the transition dynamics. Not all adapters
-        can implement this - the default raises NotImplementedError.
-
-        When Jensen's gap is small (i.e., V is approximately linear over the
-        noise distribution), V(E[Y]) ≈ E[V(Y)], allowing near-exact computation
-        of expected drifts without Monte Carlo sampling.
-
-        Args:
-            state: Optional current state tensor. If None, uses adapter's current state.
-
-        Returns:
-            Tensor of shape (state_dim,) representing E[Y].
-
-        Raises:
-            NotImplementedError: If analytic computation is not available.
-        """
-        raise NotImplementedError("Analytic expected next state not available for this adapter")
-
     def resolve_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Returns the provided state tensor, or falls back to self.state if no state is provided."""
         if state is not None: 

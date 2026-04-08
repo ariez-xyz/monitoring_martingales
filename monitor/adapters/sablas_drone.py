@@ -161,7 +161,7 @@ class SablasDrone(DynamicalSystemAdapter):
         dsdt = self.env.uncertain_dynamics(resolved_state_np, u)
         effective_noise_level = self.noise_level if noise_level < 0 else float(noise_level)
 
-        if noise_level >= 0: raise ValueError("sablas drone has its own noise, cannot override noise level")
+        if noise_level >= 0: raise ValueError("sablas drone has its own noise, cannot override noise level. noise_level=0 also doesn't correspond to expectation due to sticky noise (would need 0.95*sticky_noise since 5% chance of rolling new zero-mean gaussian noise)")
 
         next_states = []
         if include_extremes and effective_noise_level > 0:
@@ -211,23 +211,6 @@ class SablasDrone(DynamicalSystemAdapter):
             "noise_level": float(self.noise_level),
             "k_obstacle": int(self.k_obs),
         }
-
-    def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
-        resolved_state_np = self.resolve_state(state).numpy()
-        if state is None:
-            u = self._peek_control_input(resolved_state_np)
-        else:
-            u = self._compute_control_input(resolved_state_np)
-        dsdt = self.env.uncertain_dynamics(resolved_state_np, u)
-
-        expected_noise = 0.95 * self.env.noise.copy()
-        expected_noise[:3] = 0
-
-        expected_next = resolved_state_np + (dsdt + expected_noise) * self.env.dt
-        expected_next[3:6] = np.clip(expected_next[3:6], -self.env.max_speed, self.env.max_speed)
-        expected_next[6:] = np.clip(expected_next[6:], -self.env.max_theta, self.env.max_theta)
-
-        return torch.from_numpy(expected_next).float()
 
     def _visualize(self):
         import matplotlib.pyplot as plt

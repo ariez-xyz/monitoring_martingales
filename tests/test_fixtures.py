@@ -35,7 +35,7 @@ def test_normal_increment_adapter_respects_reward_bounds_and_expectation():
     assert float(rewards.min()) >= -(B + 1e-6)
     assert float(rewards.max()) <=   B + 1e-6
 
-    expected_next = adapter.get_expected_next_state(cur_state)
+    expected_next = adapter.sample(cur_state, n_samples=1, noise_level=0.0).squeeze(0)
     assert torch.allclose(expected_next, cur_state + adapter.mean)
     assert LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter) == 1.0
 
@@ -47,7 +47,7 @@ def test_normal_increment_sample_with_zero_noise_matches_expected_next_state():
     adapter = NormalIncrementAdapter(mean=-0.2, sigma=0.1, initial_value=3.0)
     cur_state = adapter.state.clone()
 
-    expected_next = adapter.get_expected_next_state(cur_state)
+    expected_next = adapter.sample(cur_state, n_samples=1, noise_level=0.0).squeeze(0)
     sampled_next = adapter.sample(cur_state, n_samples=4, noise_level=0.0)
 
     assert sampled_next.shape == (4, 1)
