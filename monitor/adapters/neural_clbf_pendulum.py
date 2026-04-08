@@ -283,6 +283,8 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             "adapter_class": type(self).__name__,
             "dt": float(self.dt),
             "noise_level": float(self.noise_level),
+            "flip_inputs_prob_to": float(self.flip_inputs_prob_to),
+            "flip_inputs_prob_from": float(self.flip_inputs_prob_from),
         }
 
     def _visualize(self):
