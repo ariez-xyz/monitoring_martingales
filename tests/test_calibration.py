@@ -25,7 +25,7 @@ def test_estimator_computes_drift_bound_from_transition_batches():
         samples_per_step=4,
     )
 
-    gamma = max(samples)
+    gamma = max(sample.value for sample in samples)
     assert math.isclose(gamma, 0.2, abs_tol=1e-6)
 
 
@@ -37,7 +37,7 @@ def test_estimator_computes_transition_wasserstein_lipschitz():
         adapter_factory,
         n_episodes=10,
     )
-    estimated_rho = max(samples)
+    estimated_rho = max(sample.value for sample in samples)
 
     # rho = 1 since NormalIncrementAdapter distribution never changes.
     assert math.isclose(estimated_rho, 1) 

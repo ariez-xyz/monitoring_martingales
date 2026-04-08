@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict
 
@@ -9,6 +10,13 @@ import torch
 from .adapters import DynamicalSystemAdapter
 
 AdapterFactory = Callable[[], DynamicalSystemAdapter]
+
+
+@dataclass(frozen=True)
+class CalibrationSample:
+    value: float
+    from_state: list[float]
+    to_state: list[float]
 
 
 class LipschitzConstantSampler:
@@ -20,7 +28,7 @@ class LipschitzConstantSampler:
         n_episodes: int = 500,
         max_steps: int = 20,
         samples_per_step: int = 8,
-    ) -> list[float]:
+    ) -> list[CalibrationSample]:
         """Collect per-step drift-bound samples from rollout batches.
 
         Coverage note:
@@ -29,7 +37,7 @@ class LipschitzConstantSampler:
         target/stable region and underexplore the broader state space, while
         more resets tend to improve coverage of the operating region.
         """
-        step_bound_samples: list[float] = []
+        step_bound_samples: list[CalibrationSample] = []
         adapter = adapter_factory()
 
         for _ in range(n_episodes):
@@ -38,7 +46,14 @@ class LipschitzConstantSampler:
                 current_state = adapter.get_state()
                 next_states = adapter.sample(n_samples=samples_per_step, include_extremes=True)
                 drift_batch = adapter.get_drift(next_states, current_state)
-                step_bound_samples.append(float(torch.max(torch.abs(drift_batch))))
+                max_idx = int(torch.argmax(torch.abs(drift_batch)).item())
+                step_bound_samples.append(
+                    CalibrationSample(
+                        value=float(torch.abs(drift_batch[max_idx]).item()),
+                        from_state=current_state.detach().cpu().tolist(),
+                        to_state=next_states[max_idx].detach().cpu().tolist(),
+                    )
+                )
                 adapter.step()
                 if adapter.done():
                     break
@@ -50,7 +65,7 @@ class LipschitzConstantSampler:
         adapter_factory: AdapterFactory,
         n_episodes: int = 500,
         max_steps: int = 20,
-    ) -> list[float]:
+    ) -> list[CalibrationSample]:
         """Collect rollout-local transition Wasserstein ratio samples.
 
         This uses the rollout-local heuristic currently documented in the repo:
@@ -65,7 +80,7 @@ class LipschitzConstantSampler:
         target/stable region and underexplore the broader state space, while
         more resets tend to improve coverage of the operating region.
         """
-        wasserstein_ratios: list[float] = []
+        wasserstein_ratios: list[CalibrationSample] = []
         adapter = adapter_factory()
 
         for _ in range(n_episodes):
@@ -79,7 +94,7 @@ class LipschitzConstantSampler:
 
                 # 2. Get expected successors (noise_level=0 is expectation for zero mean)
                 t1 = adapter.sample(s1, noise_level=0)
-                t2 = adapter.sample(s2, noise_level=0) 
+                t2 = adapter.sample(s2, noise_level=0)
 
                 # 3. Compute distances
                 state_distance = adapter.distance(s1, s2)
@@ -92,7 +107,13 @@ class LipschitzConstantSampler:
                 # <=>  W1(P(s1), P(s2)) / d(s1, s2) <= rho
                 # <=>         d(t1, t2) / d(s1, s2) <= rho
                 # (the latter simplification holds because noise laws are translated copies)
-                wasserstein_ratios.append(succ_distance / state_distance)
+                wasserstein_ratios.append(
+                    CalibrationSample(
+                        value=float(succ_distance / state_distance),
+                        from_state=s1.detach().cpu().tolist(),
+                        to_state=s2.detach().cpu().tolist(),
+                    )
+                )
 
                 adapter.step()
                 if adapter.done():

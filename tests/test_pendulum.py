@@ -111,7 +111,6 @@ def test_pendulum_drift_bound_orders_widely_separated_timesteps():
     3. A much larger dt gives a larger bound
     """
     import time
-    import numpy as np
     from monitor.calibration import LipschitzConstantSampler
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
 
@@ -148,7 +147,7 @@ def test_pendulum_drift_bound_orders_widely_separated_timesteps():
         max_steps=100, # large dt doesn't need many steps
         samples_per_step=4,
     )
-    gamma_large = max(gamma_large_samples)
+    gamma_large = max(sample.value for sample in gamma_large_samples)
 
     print(f"  dt=0.001: gamma = {gamma_small:.4f}")
     print(f"  dt=0.1:  gamma = {gamma_large:.4f}")
@@ -261,7 +260,7 @@ def test_pendulum_empirical_drift_bound_estimation_does_not_mutate_live_state():
         n_episodes=1,
         max_steps=2,
     )
-    gamma = max(gamma_samples)
+    gamma = max(sample.value for sample in gamma_samples)
 
     assert gamma > 0 # type:ignore
     assert torch.allclose(adapter.state, state_before)

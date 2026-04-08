@@ -58,6 +58,9 @@ def test_calibration_cli_smoke_updates_temp_cache(tmp_path, monkeypatch, capsys)
     assert "stderr" in cache_payload
     assert cache_payload["stderr"] == ""
     assert list(cache_payload)[-1] == "samples"
+    assert "value" in cache_payload["samples"][0]
+    assert "from_state" in cache_payload["samples"][0]
+    assert "to_state" in cache_payload["samples"][0]
 
     out = capsys.readouterr().out
     assert "adapter=fixture" in out

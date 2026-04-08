@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 import time
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -12,7 +13,7 @@ import numpy as np
 
 from monitor.adapters import NeuralCLBFPendulum, SablasDrone
 from monitor.adapters.interface import DynamicalSystemAdapter
-from monitor.calibration import LipschitzConstantProvider, LipschitzConstantSampler
+from monitor.calibration import CalibrationSample, LipschitzConstantProvider, LipschitzConstantSampler
 
 
 AdapterBuilder = Callable[[argparse.Namespace], DynamicalSystemAdapter]
@@ -66,7 +67,7 @@ def _accumulate_episode_samples(
     estimate: str,
     max_steps: int,
     samples_per_step: int,
-) -> list[float]:
+) -> list[CalibrationSample]:
     if estimate == "drift":
         return sampler.sample_drift_bounds(
             adapter_factory,
@@ -90,11 +91,12 @@ def _cache_run(
     bound_key: dict,
     estimate: str,
     args: argparse.Namespace,
-    samples: list[float],
+    samples: list[CalibrationSample],
     result: float,
     stdout_text: str,
     stderr_text: str,
 ) -> Path:
+    sample_values = [sample.value for sample in samples]
     payload = {
         "adapter": adapter_name,
         "bound_key": bound_key,
@@ -111,15 +113,15 @@ def _cache_run(
         },
         "sample_count": len(samples),
         "summary": {
-            "min": min(samples) if samples else None,
-            "max": max(samples) if samples else None,
-            "mean": float(np.mean(samples)) if samples else None,
+            "min": min(sample_values) if sample_values else None,
+            "max": max(sample_values) if sample_values else None,
+            "mean": float(np.mean(sample_values)) if sample_values else None,
             "percentile": args.percentile,
             "result": result,
         },
         "stdout": stdout_text,
         "stderr": stderr_text,
-        "samples": samples,
+        "samples": [asdict(sample) for sample in samples],
     }
     path.write_text(json.dumps(payload, indent=2) + "\n")
     return path
@@ -137,9 +139,9 @@ def _run_estimate(
     args: argparse.Namespace,
     builder: AdapterBuilder,
     log_stdout: Callable[[str], None],
-) -> tuple[float, list[float]]:
+) -> tuple[float, list[CalibrationSample]]:
     sampler = LipschitzConstantSampler()
-    samples: list[float] = []
+    samples: list[CalibrationSample] = []
     started = time.monotonic()
     episodes_run = 0
 
@@ -161,7 +163,8 @@ def _run_estimate(
     if not samples:
         raise ValueError(f"No {estimate} samples were collected")
 
-    result = max(float(np.percentile(samples, args.percentile)), 1e-6)
+    sample_values = [sample.value for sample in samples]
+    result = max(float(np.percentile(sample_values, args.percentile)), 1e-6)
     log_stdout(f"{estimate}_samples={len(samples)}")
     return result, samples
 
