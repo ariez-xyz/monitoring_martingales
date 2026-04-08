@@ -201,18 +201,7 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
         """Sample additive control noise in control space."""
         if self.noise_level <= 0:
             return torch.zeros(n_samples, self.dynamics.n_controls)
-
-        # Inverted pendulum has 1D control (torque), so sample directly from
-        # uniform[-noise_level, noise_level] instead of generic ball sampling.
-        if self.dynamics.n_controls == 1:
-            return (2.0 * torch.rand(n_samples, 1) - 1.0) * self.noise_level
-
-        # Generic fallback for multi-input systems.
-        dim = self.dynamics.n_controls
-        direction = torch.randn(n_samples, dim)
-        direction = direction / torch.norm(direction, dim=1, keepdim=True)
-        radius = torch.rand(n_samples, 1) ** (1.0 / dim)
-        return (direction * radius) * self.noise_level
+        return (2.0 * torch.rand(n_samples, 1) - 1.0) * self.noise_level
 
     def _get_control(self, state_batch: torch.Tensor, use_hold: bool = False) -> torch.Tensor:
         """Return the controller output for this query.
@@ -273,11 +262,6 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             "dt": float(self.dt),
             "noise_level": float(self.noise_level),
         }
-
-    def successor_distribution_for(self, state: torch.Tensor):
-        raise NotImplementedError(
-            "Successor distribution representation is not implemented yet for NeuralCLBFPendulum"
-        )
 
     def noisy_transitions(self, samples: int = 4) -> Tuple[torch.Tensor, torch.Tensor]:
         """Return the current state and a representative batch of noisy successors."""

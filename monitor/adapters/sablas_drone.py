@@ -187,9 +187,6 @@ class SablasDrone(DynamicalSystemAdapter):
     def noisy_transitions(self, samples: int = 4) -> Tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError("noisy_transitions is not implemented yet for SablasDrone")
 
-    def successor_distribution_for(self, state: torch.Tensor):
-        raise NotImplementedError("Successor distribution representation is not implemented yet for SablasDrone")
-
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         resolved_state_np = self.resolve_state(state).numpy()
         if state is None:

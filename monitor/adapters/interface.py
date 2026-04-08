@@ -150,15 +150,6 @@ class DynamicalSystemAdapter(ABC):
         """
         pass
 
-    @abstractmethod
-    def successor_distribution_for(self, state: torch.Tensor):
-        """
-        Return an adapter-specific representation of the one-step successor law at `state`.
-
-        Adapters that do not support this yet should raise `NotImplementedError`.
-        """
-        raise NotImplementedError("Successor distribution representation not available for this adapter")
-
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Computes E[Y] where Y ~ P(x) is the next state analytically.

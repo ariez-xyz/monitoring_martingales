@@ -42,8 +42,6 @@ class LipschitzConstantEstimator:
         gamma = float(np.percentile(step_bound_samples, percentile))
         return max(gamma, 1e-6)
 
-    def wasserstein_distance(self, dist1, dist2) -> float:
-        raise NotImplementedError("TODO.")
 
     def estimate_transition_wasserstein_lipschitz(
         self,
@@ -53,8 +51,8 @@ class LipschitzConstantEstimator:
         percentile: float = 99.999,
         samples_per_step: int = 4,
     ) -> float:
-        """Estimate a conservative W1-Lipschitz bound for one-step kernels."""
-        wasserstein_ratios = []
+        """Estimate W1-Lipschitz bound for one-step kernels."""
+        wasserstein_distances = []
         adapter = adapter_factory()
 
         for _ in range(n_episodes):
@@ -66,21 +64,24 @@ class LipschitzConstantEstimator:
                     state_distance = adapter.distance(current_state, next_state)
                     if state_distance <= 0:
                         continue
-                    current_state_dist = adapter.successor_distribution_for(current_state)
-                    next_state_dist = adapter.successor_distribution_for(next_state)
-                    kernel_distance = self.wasserstein_distance(current_state_dist, next_state_dist)
-                    wasserstein_ratios.append(kernel_distance / state_distance)
+                    current_state_center = adapter.get_expected_next_state(current_state)
+                    next_state_center = adapter.get_expected_next_state(next_state)
+                    kernel_distance = adapter.distance(current_state_center, next_state_center)
+                    # Wasserstein distance for **ZERO-MEAN** distributions reduces to
+                    # ratio of distances
+                    wasserstein_distances.append(kernel_distance / state_distance)
 
                 adapter.step()
                 if adapter.done():
                     break
 
-        if not wasserstein_ratios:
+        if not wasserstein_distances:
             raise ValueError(
                 "No non-zero state distances were collected while estimating Wasserstein Lipschitz bound"
             )
 
-        rho = float(np.percentile(wasserstein_ratios, percentile))
+        rho = float(np.percentile(wasserstein_distances, percentile))
+        raise NotImplementedError
         return max(rho, 1e-6)
 
 

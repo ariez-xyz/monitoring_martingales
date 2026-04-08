@@ -118,11 +118,6 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         next_states = self.sample(n_samples=samples)
         return current_state, next_states
 
-    def successor_distribution_for(self, state: torch.Tensor):
-        raise NotImplementedError(
-            "Successor distribution representation is not implemented yet for NormalIncrementAdapter"
-        )
-
     def get_state_dim(self) -> int:
         return 1
 
