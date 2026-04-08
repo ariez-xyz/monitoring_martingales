@@ -277,14 +277,15 @@ def test_pendulum_empirical_drift_bound_estimation_does_not_mutate_live_state():
         assert torch.allclose(adapter._cached_control, cached_control_before)
 
 
-def test_pendulum_noisy_transitions_return_endpoints_plus_samples():
-    """The iterator should return endpoint successors plus sampled-noise successors."""
+def test_pendulum_sample_with_extremes_returns_endpoints_plus_samples():
+    """Including extremes should prepend endpoint successors to sampled-noise successors."""
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
 
     torch.manual_seed(0)
     adapter = NeuralCLBFPendulum(dt=0.1, noise_level=0.1)
 
-    current_state, next_states = adapter.noisy_transitions(samples=4)
+    current_state = adapter.get_state()
+    next_states = adapter.sample(n_samples=4, include_extremes=True)
 
     assert current_state.shape == (adapter.dynamics.n_dims,)
     assert next_states.shape == (6, adapter.dynamics.n_dims)

@@ -212,10 +212,6 @@ class SablasDrone(DynamicalSystemAdapter):
             "k_obstacle": int(self.k_obs),
         }
 
-    def noisy_transitions(self, samples: int = 4) -> Tuple[torch.Tensor, torch.Tensor]:
-        current_state = self.resolve_state().clone()
-        return current_state, self.sample(n_samples=samples, include_extremes=True)
-
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         resolved_state_np = self.resolve_state(state).numpy()
         if state is None:

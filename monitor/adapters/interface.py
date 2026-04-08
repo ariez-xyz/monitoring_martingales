@@ -159,18 +159,6 @@ class DynamicalSystemAdapter(ABC):
         """
         pass
 
-    @abstractmethod
-    def noisy_transitions(self, samples: int = 4) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Return the current state together with a representative batch of one-step successors.
-
-        Returns:
-            A tuple `(current_state, next_states)` where `current_state` has
-            shape `(state_dim,)` and `next_states` has shape
-            `(batch_size, state_dim)`.
-        """
-        pass
-
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Computes E[Y] where Y ~ P(x) is the next state analytically.

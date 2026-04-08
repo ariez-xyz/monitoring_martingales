@@ -134,11 +134,6 @@ class NormalIncrementAdapter(DynamicalSystemAdapter):
         increments = torch.cat(increments, dim=0)
         return state[0].unsqueeze(0) + increments
 
-    def noisy_transitions(self, samples: int = 4) -> Tuple[torch.Tensor, torch.Tensor]:
-        current_state = self.state.clone()
-        next_states = self.sample(n_samples=samples)
-        return current_state, next_states
-
     def get_state_dim(self) -> int:
         return 1
 

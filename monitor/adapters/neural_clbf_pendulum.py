@@ -285,11 +285,6 @@ class NeuralCLBFPendulum(DynamicalSystemAdapter):
             "noise_level": float(self.noise_level),
         }
 
-    def noisy_transitions(self, samples: int = 4) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Return the current state and a representative batch of noisy successors."""
-        current_state = self.state.clone()
-        return current_state, self.sample(n_samples=samples, include_extremes=True)
-
     def get_expected_next_state(self, state: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Compute E[Y] analytically.

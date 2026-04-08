@@ -29,7 +29,8 @@ class LipschitzConstantEstimator:
         for _ in range(n_episodes):
             adapter.reset()
             for _ in range(max_steps):
-                current_state, next_states = adapter.noisy_transitions(samples_per_step)
+                current_state = adapter.get_state()
+                next_states = adapter.sample(n_samples=samples_per_step, include_extremes=True)
                 drift_batch = adapter.get_drift(next_states, current_state)
                 step_bound_samples.append(float(torch.max(torch.abs(drift_batch))))
                 adapter.step()
@@ -58,7 +59,8 @@ class LipschitzConstantEstimator:
         for _ in range(n_episodes):
             adapter.reset()
             for _ in range(max_steps):
-                current_state, next_states = adapter.noisy_transitions(samples_per_step)
+                current_state = adapter.get_state()
+                next_states = adapter.sample(n_samples=samples_per_step, include_extremes=True)
 
                 for next_state in next_states:
                     state_distance = adapter.distance(current_state, next_state)
