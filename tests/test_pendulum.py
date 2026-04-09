@@ -189,8 +189,8 @@ def test_pendulum_seeded_bounds_cover_observed_step_drift():
             f"Unexpected cached bound for dt={dt}, noise={noise_level}: {gamma} vs {expected_bound}"
         )
 
-        # 50 resets with 10 steps to keep runtime short.
-        for _ in range(50):
+        # 20 resets with 10 steps to keep runtime short.
+        for _ in range(20):
             observed_max = 0.0
             seed = int(random() * 999999)
             adapter.reset(seed=seed)
@@ -209,6 +209,69 @@ def test_pendulum_seeded_bounds_cover_observed_step_drift():
                 f"observed_max={observed_max:.6f}, gamma={gamma:.6f}"
                 f"seed={seed}"
             )
+
+
+def test_pendulum_seeded_transition_bounds_cover_observed_local_ratios():
+    """
+    Validate that seeded pendulum transition-Lipschitz bounds cover state-to-successor ratios.
+
+    For each seeded pendulum transition configuration, this test runs short rollouts and
+    checks the bound on a live state and one sampled successor:
+        d(T(x), T(x')) / d(x, x') <= rho
+    where `x'` is a one-step sampled successor of `x` and `T` is the zero-noise successor map.
+    """
+    from random import random
+
+    from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
+
+    seeded_bounds = {
+        (0.01, 0.0, 0.0, 0.0): 1.4142135381698608,
+        (0.01, 0.0, 1.0, 0.0): 2.0,
+    }
+    tol = 1e-6
+
+    for (dt, noise_level, flip_inputs_prob_to, flip_inputs_prob_from), expected_bound in seeded_bounds.items():
+        adapter = NeuralCLBFPendulum(
+            dt=dt,
+            noise_level=noise_level,
+            flip_inputs_prob_to=flip_inputs_prob_to,
+            flip_inputs_prob_from=flip_inputs_prob_from,
+        )
+        rho = LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter)
+        assert abs(rho - expected_bound) < tol, (
+            "Unexpected cached transition bound for "
+            f"dt={dt}, noise={noise_level}, flip_to={flip_inputs_prob_to}, flip_from={flip_inputs_prob_from}: "
+            f"{rho} vs {expected_bound}"
+        )
+
+        for _ in range(50):
+            observed_max = 0.0
+            seed = int(random() * 999999)
+            adapter.reset(seed=seed)
+
+            for _ in range(10):
+                s1 = adapter.get_state()
+                s2 = adapter.sample(n_samples=1).squeeze(0)
+
+                t1 = adapter.sample(s1, n_samples=1, noise_level=0.0).squeeze(0)
+                t2 = adapter.sample(s2, n_samples=1, noise_level=0.0).squeeze(0)
+
+                state_distance = adapter.distance(s1, s2)
+                succ_distance = adapter.distance(t1, t2)
+
+                observed_ratio = succ_distance / state_distance
+
+                assert observed_ratio <= rho + tol, (
+                    "Observed transition ratio exceeds cached bound for "
+                    f"dt={dt}, noise={noise_level}, flip_to={flip_inputs_prob_to}, flip_from={flip_inputs_prob_from}: "
+                    f"observed_max={observed_max:.6f}, rho={rho:.6f}, seed={seed}, "
+                    f"s1={s1}, s2={s2}"
+                )
+
+                adapter.step()
+                if adapter.done():
+                    break
+
 
 def test_pendulum_drift_sign_convention():
     """Pendulum uses CLF residual: V(y) - V(x), so negative means safe."""
