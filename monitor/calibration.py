@@ -125,14 +125,12 @@ class LipschitzConstantSampler:
 
 
 class LipschitzConstantProvider:
-    """Thin JSON-backed store for precomputed and runtime-calibrated constants."""
+    """Thin JSON-backed store for persisted calibration constants."""
 
     _json_path = Path(__file__).resolve().parent.parent / "calibration_constants.json"
     _loaded = False
     _precomputed_drift_bounds: Dict[str, float] = {}
     _precomputed_transition_lipschitz: Dict[str, float] = {}
-    _drift_bound_cache: Dict[str, float] = {}
-    _transition_lipschitz_cache: Dict[str, float] = {}
 
     @classmethod
     def _encode_key(cls, key: Dict[str, Any]) -> str:
@@ -169,8 +167,9 @@ class LipschitzConstantProvider:
 
     @classmethod
     def clear_cache(cls) -> None:
-        cls._drift_bound_cache.clear()
-        cls._transition_lipschitz_cache.clear()
+        cls._loaded = False
+        cls._precomputed_drift_bounds = {}
+        cls._precomputed_transition_lipschitz = {}
 
     @classmethod
     def _validate_overwrite(
@@ -198,10 +197,7 @@ class LipschitzConstantProvider:
         cls._load_if_needed()
         cache_key = cls._encode_key(adapter.bound_key())
         existing_value = cls._precomputed_drift_bounds.get(cache_key)
-        if existing_value is None:
-            existing_value = cls._drift_bound_cache.get(cache_key)
         cls._validate_overwrite(existing_value, value, force, "drift bound", cache_key)
-        cls._drift_bound_cache[cache_key] = value
         cls._precomputed_drift_bounds[cache_key] = value
         cls._write_json()
 
@@ -216,8 +212,6 @@ class LipschitzConstantProvider:
         cls._load_if_needed()
         cache_key = cls._encode_key(adapter.bound_key())
         existing_value = cls._precomputed_transition_lipschitz.get(cache_key)
-        if existing_value is None:
-            existing_value = cls._transition_lipschitz_cache.get(cache_key)
         cls._validate_overwrite(
             existing_value,
             value,
@@ -225,19 +219,16 @@ class LipschitzConstantProvider:
             "transition Wasserstein Lipschitz bound",
             cache_key,
         )
-        cls._transition_lipschitz_cache[cache_key] = value
         cls._precomputed_transition_lipschitz[cache_key] = value
         cls._write_json()
 
     @classmethod
     def get_drift_bound(cls, adapter: DynamicalSystemAdapter) -> float:
-        """Return a drift bound from precomputed values or cache."""
+        """Return a persisted drift bound for the adapter key."""
         cls._load_if_needed()
         cache_key = cls._encode_key(adapter.bound_key())
         if cache_key in cls._precomputed_drift_bounds:
             return cls._precomputed_drift_bounds[cache_key]
-        if cache_key in cls._drift_bound_cache:
-            return cls._drift_bound_cache[cache_key]
         raise KeyError(f"No drift bound registered for key {cache_key!r}")
 
     @classmethod
@@ -245,11 +236,9 @@ class LipschitzConstantProvider:
         cls,
         adapter: DynamicalSystemAdapter,
     ) -> float:
-        """Return a transition-kernel Lipschitz bound from precomputed values or cache."""
+        """Return a persisted transition-kernel Lipschitz bound for the adapter key."""
         cls._load_if_needed()
         cache_key = cls._encode_key(adapter.bound_key())
         if cache_key in cls._precomputed_transition_lipschitz:
             return cls._precomputed_transition_lipschitz[cache_key]
-        if cache_key in cls._transition_lipschitz_cache:
-            return cls._transition_lipschitz_cache[cache_key]
         raise KeyError(f"No transition Wasserstein Lipschitz bound registered for key {cache_key!r}")

@@ -14,8 +14,6 @@ def test_calibration_cli_smoke_updates_temp_cache(tmp_path, monkeypatch, capsys)
     monkeypatch.setattr(LipschitzConstantProvider, "_loaded", False)
     monkeypatch.setattr(LipschitzConstantProvider, "_precomputed_drift_bounds", {})
     monkeypatch.setattr(LipschitzConstantProvider, "_precomputed_transition_lipschitz", {})
-    monkeypatch.setattr(LipschitzConstantProvider, "_drift_bound_cache", {})
-    monkeypatch.setattr(LipschitzConstantProvider, "_transition_lipschitz_cache", {})
     monkeypatch.setattr(calibrate, "CACHE_DIR", temp_cache)
     monkeypatch.setitem(
         calibrate.ADAPTER_REGISTRY,
