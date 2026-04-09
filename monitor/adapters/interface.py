@@ -9,8 +9,10 @@ class DynamicalSystemAdapter(ABC):
 
     Noise contract:
     - Adapters should accept a constructor argument named `noise_level`.
-    - `noise_level=0` should disable transition noise where feasible.
+    - `noise_level=0` should yield completely deterministic transitions.
+    - Noise should be zero-mean, such that `noise_level=0` gives the expected next state.
     - Larger `noise_level` values should produce larger transition perturbations.
+    - Normalization: Adapters shouldn't have wildly different scales for `noise_level`. A value of 0.5 should produce similar-ish outcomes.
     - The exact noise process is adapter-specific.
     """
     state_history: List[torch.Tensor]
