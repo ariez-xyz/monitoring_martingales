@@ -90,7 +90,9 @@ class LipschitzConstantSampler:
                 # ratio of distances, hence our procedure:
 
                 # 1. Sample two nearby states
-                s1, s2 = adapter.sample(n_samples=2, noise_level=0.1)
+                s1, s2 = adapter.sample(n_samples=2, noise_level=0.5)
+                if torch.allclose(s1, s2, rtol=1e-4): # avoid float inaccuracies
+                    continue 
 
                 # 2. Get expected successors (noise_level=0 is expectation for zero mean)
                 t1 = adapter.sample(s1, noise_level=0)
