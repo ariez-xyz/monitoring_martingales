@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from math import log
 from pathlib import Path
 from typing import Any, Callable, Dict
 
@@ -242,3 +243,17 @@ class LipschitzConstantProvider:
         if cache_key in cls._precomputed_transition_lipschitz:
             return cls._precomputed_transition_lipschitz[cache_key]
         raise KeyError(f"No transition Wasserstein Lipschitz bound registered for key {cache_key!r}")
+
+    @classmethod
+    def get_continuous_wasserstein_lipschitz(
+        cls,
+        adapter: DynamicalSystemAdapter,
+    ) -> float:
+        """Return a persisted transition-kernel Lipschitz bound for the adapter key."""
+        if "dt" not in adapter.bound_key().keys():
+            raise KeyError(f"Can't derive rho for {adapter.__class__} without dt. Got bound key {adapter.bound_key()}.")
+
+        t = adapter.bound_key()['dt']
+        L_t = LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter)
+
+        return log(L_t)/t
