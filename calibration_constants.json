@@ -4,6 +4,7 @@
     "{\"adapter_class\":\"NeuralCLBFPendulum\",\"dt\":0.001,\"flip_inputs_prob_from\":0.0,\"flip_inputs_prob_to\":0.0,\"noise_level\":0.1}": 0.2,
     "{\"adapter_class\":\"NeuralCLBFPendulum\",\"dt\":0.001,\"flip_inputs_prob_from\":0.0,\"flip_inputs_prob_to\":0.0,\"noise_level\":1.0}": 0.2,
     "{\"adapter_class\":\"NeuralCLBFPendulum\",\"dt\":0.001,\"flip_inputs_prob_from\":0.0,\"flip_inputs_prob_to\":0.0,\"noise_level\":10.0}": 0.25,
+    "{\"adapter_class\":\"NeuralCLBFPendulum\",\"dt\":0.001,\"flip_inputs_prob_from\":0.0,\"flip_inputs_prob_to\":1.0,\"noise_level\":0.0}": 0.26778316497802734,
     "{\"adapter_class\":\"NeuralCLBFPendulum\",\"dt\":0.01,\"flip_inputs_prob_from\":0.0,\"flip_inputs_prob_to\":0.0,\"noise_level\":0.0}": 1.95,
     "{\"adapter_class\":\"NeuralCLBFPendulum\",\"dt\":0.01,\"flip_inputs_prob_from\":0.0,\"flip_inputs_prob_to\":0.0,\"noise_level\":0.1}": 1.9,
     "{\"adapter_class\":\"NeuralCLBFPendulum\",\"dt\":0.01,\"flip_inputs_prob_from\":0.0,\"flip_inputs_prob_to\":0.0,\"noise_level\":1.0}": 2.0,
@@ -22,6 +23,8 @@
     "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":7.0,\"mean\":0.123,\"sigma\":0.456}": 3.3150000000000004
   },
   "transition_wasserstein_lipschitz": {
+    "{\"adapter_class\":\"NeuralCLBFPendulum\",\"dt\":0.001,\"flip_inputs_prob_from\":0.0,\"flip_inputs_prob_to\":0.0,\"noise_level\":0.0}": 0.99644128113879,
+    "{\"adapter_class\":\"NeuralCLBFPendulum\",\"dt\":0.001,\"flip_inputs_prob_from\":0.0,\"flip_inputs_prob_to\":1.0,\"noise_level\":0.0}": 1.0087719298245614,
     "{\"adapter_class\":\"NeuralCLBFPendulum\",\"dt\":0.01,\"flip_inputs_prob_from\":0.0,\"flip_inputs_prob_to\":0.0,\"noise_level\":0.0}": 1.4142135381698608,
     "{\"adapter_class\":\"NeuralCLBFPendulum\",\"dt\":0.01,\"flip_inputs_prob_from\":0.0,\"flip_inputs_prob_to\":1.0,\"noise_level\":0.0}": 2.0,
     "{\"adapter_class\":\"NormalIncrementAdapter\",\"clamp_at_sigma\":2.0,\"mean\":-0.1,\"sigma\":0.05}": 1.0,
