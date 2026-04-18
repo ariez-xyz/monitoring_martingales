@@ -73,6 +73,10 @@ class UniformWeights(WeightingStrategy):
         h = adapter.bound_key().get('dt', 1)
         m = 2 * self.r + 1 # window size
 
+        return self.DE_fla(rho, h, gamma, m, continuous)
+
+    @staticmethod
+    def DE_fla(rho: float, h: float, gamma: float, m: float, continuous: bool) -> float:
         if continuous: 
             rho_term = math.e ** (rho * h) - 1
             h_term = h
@@ -91,6 +95,10 @@ class UniformWeights(WeightingStrategy):
         gamma = LipschitzConstantProvider.get_drift_bound(adapter)
         m = 2 * self.r + 1 # window size
 
+        return self.SE_fla(gamma, h, m, delta, continuous)
+
+    @staticmethod
+    def SE_fla(gamma: float, h: float, m: float, delta: float, continuous: bool) -> float:
         if continuous: 
             h_term = h
         else:
@@ -100,8 +108,6 @@ class UniformWeights(WeightingStrategy):
         return SE
 
     def AE(self, adapter: DynamicalSystemAdapter, continuous: bool = False) -> float:
-        if not continuous: return 0
-
         if continuous and "dt" not in adapter.bound_key().keys():
             raise KeyError(f"Can't compute continuous DE for {adapter.__class__} without dt. Got bound key {adapter.bound_key()}.")
 
@@ -109,7 +115,14 @@ class UniformWeights(WeightingStrategy):
         rho = LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter, continuous)
         h = adapter.bound_key().get('dt', 1)
 
-        return rho * h * gamma / 2
+        return self.AE_fla(rho, h, gamma, continuous)
+
+    @staticmethod
+    def AE_fla(rho: float, h: float, gamma: float, continuous: bool) -> float:
+        if continuous:
+            return rho * h * gamma / 2
+        else:
+            return 0
 
 
 class OptimalTemporalWeights(WeightingStrategy):
@@ -136,6 +149,13 @@ class OptimalTemporalWeights(WeightingStrategy):
         rho = LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter, continuous)
         h = adapter.bound_key().get('dt', 1)
 
+        optimal_window_length = OptimalTemporalWeights.compute_window_length(rho, h, delta, continuous)
+        optimal_radius = round((optimal_window_length-1)/2)
+
+        self.weights = UniformWeights(radius=optimal_radius)
+
+    @staticmethod
+    def compute_window_length(rho: float, h: float, delta: float, continuous: bool) -> float:
         numerator = 2 * sqrt(2 * log(2/delta))
 
         if continuous:
@@ -143,9 +163,7 @@ class OptimalTemporalWeights(WeightingStrategy):
         else: 
             denominator = rho + 1
 
-        optimal_window_length = (numerator / denominator) ** (2/3)
-        optimal_radius = round((optimal_window_length-1)/2)
-        self.weights = UniformWeights(radius=optimal_radius)
+        return (numerator / denominator) ** (2/3)
 
     def get_radius(self) -> int:
         return self.weights.get_radius()
