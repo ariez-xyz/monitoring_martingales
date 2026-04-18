@@ -28,6 +28,12 @@ class DynamicalSystemAdapter(ABC):
         """
         Calculates the drift for monitoring the certificate condition.
 
+        In the simplest case, this is just:
+
+        get_certificate_value(next_state) - get_certificate_value(cur_state)
+
+        HOWEVER:
+
         The drift should be computed such that E[drift] ≤ 0 indicates the
         certificate condition is satisfied. Adapters handle sign conventions
         and alpha functions internally.
