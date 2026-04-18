@@ -236,24 +236,21 @@ class LipschitzConstantProvider:
     def get_transition_wasserstein_lipschitz(
         cls,
         adapter: DynamicalSystemAdapter,
+        continuous: bool = False,
     ) -> float:
         """Return a persisted transition-kernel Lipschitz bound for the adapter key."""
         cls._load_if_needed()
         cache_key = cls._encode_key(adapter.bound_key())
-        if cache_key in cls._precomputed_transition_lipschitz:
-            return cls._precomputed_transition_lipschitz[cache_key]
-        raise KeyError(f"No transition Wasserstein Lipschitz bound registered for key {cache_key!r}")
+        if cache_key not in cls._precomputed_transition_lipschitz:
+            raise KeyError(f"No transition Wasserstein Lipschitz bound registered for key {cache_key!r}")
 
-    @classmethod
-    def get_continuous_wasserstein_lipschitz(
-        cls,
-        adapter: DynamicalSystemAdapter,
-    ) -> float:
-        """Return a persisted transition-kernel Lipschitz bound for the adapter key."""
-        if "dt" not in adapter.bound_key().keys():
-            raise KeyError(f"Can't derive rho for {adapter.__class__} without dt. Got bound key {adapter.bound_key()}.")
+        bound = cls._precomputed_transition_lipschitz[cache_key]
 
-        t = adapter.bound_key()['dt']
-        L_t = LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter)
+        if continuous:
+            if "dt" not in adapter.bound_key().keys():
+                raise KeyError(f"Can't derive rho for {adapter.__class__} without dt. Got bound key {adapter.bound_key()}.")
+            t = adapter.bound_key()['dt']
+            bound = log(bound)/t
 
-        return log(L_t)/t
+        return bound
+

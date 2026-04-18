@@ -1,3 +1,8 @@
+from monitor.calibration import LipschitzConstantProvider
+from monitor.estimators import HistoryEstimator
+from monitor.weighting import UniformWeights
+
+
 def test_hypothesis_monitor_becomes_more_suspicious_under_input_flip_fault():
     """Injected control-sign faults should increase the e-process."""
     import torch
@@ -5,6 +10,7 @@ def test_hypothesis_monitor_becomes_more_suspicious_under_input_flip_fault():
     from monitor.adapters.neural_clbf_pendulum import NeuralCLBFPendulum
 
     initial_state = torch.tensor([1.0, 0.5])
+    delta = 0.1
     max_steps = 400
 
     nominal = NeuralCLBFPendulum(
@@ -23,8 +29,8 @@ def test_hypothesis_monitor_becomes_more_suspicious_under_input_flip_fault():
     nominal.reset(initial_state=initial_state)
     faulty.reset(initial_state=initial_state)
 
-    nominal_monitor = HypothesisTestingMonitor(delta=0.01)
-    faulty_monitor = HypothesisTestingMonitor(delta=0.01)
+    nominal_monitor = HypothesisTestingMonitor(delta)
+    faulty_monitor = HypothesisTestingMonitor(delta)
 
     nominal_max_e = 1.0
     faulty_max_e = 1.0
@@ -46,6 +52,6 @@ def test_hypothesis_monitor_becomes_more_suspicious_under_input_flip_fault():
         f"Expected input-flip fault to raise suspicion, got nominal_max_e={nominal_max_e}, "
         f"faulty_max_e={faulty_max_e}"
     )
-    assert faulty_rejected or faulty_max_e >= 2.0, (
-        f"Expected strong suspicion under flip fault, got faulty_max_e={faulty_max_e}"
+    assert faulty_rejected, (
+        f"Expected rejection under flip fault, got faulty_max_e={faulty_max_e} < {1/delta}"
     )

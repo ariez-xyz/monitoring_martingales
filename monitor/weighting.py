@@ -1,3 +1,4 @@
+import math
 from typing import Optional
 from abc import ABC, abstractmethod
 from math import log, sqrt
@@ -30,11 +31,15 @@ class WeightingStrategy(ABC):
         pass
 
     @abstractmethod
-    def DE(self, adapter: DynamicalSystemAdapter) -> float:
+    def DE(self, adapter: DynamicalSystemAdapter, continuous: bool = False) -> float:
         pass
 
     @abstractmethod
-    def SE(self, adapter: DynamicalSystemAdapter, delta: float) -> float:
+    def SE(self, adapter: DynamicalSystemAdapter, delta: float, continuous: bool = False) -> float:
+        pass
+
+    @abstractmethod
+    def AE(self, adapter: DynamicalSystemAdapter, continuous: bool = False) -> float:
         pass
 
 
@@ -59,16 +64,53 @@ class UniformWeights(WeightingStrategy):
         weights[start_idx:end_idx + 1] = 1.0 / window_length
         return weights
 
-    def DE(self, adapter: DynamicalSystemAdapter) -> float:
-        gamma = LipschitzConstantProvider.get_drift_bound(adapter)
-        rho = LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter)
-        m = 2 * self.r + 1
-        return gamma * (rho + 1) * (m**2 -1)/(4*m)
+    def DE(self, adapter: DynamicalSystemAdapter, continuous: bool = False) -> float:
+        if continuous and "dt" not in adapter.bound_key().keys():
+            raise KeyError(f"Can't compute continuous DE for {adapter.__class__} without dt. Got bound key {adapter.bound_key()}.")
 
-    def SE(self, adapter: DynamicalSystemAdapter, delta: float) -> float:
         gamma = LipschitzConstantProvider.get_drift_bound(adapter)
-        m = 2 * self.r + 1
-        return gamma * sqrt((2*log(2/delta)) / m)
+        rho = LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter, continuous)
+        h = adapter.bound_key().get('dt', 1)
+        m = 2 * self.r + 1 # window size
+
+        if continuous: 
+            rho_term = math.e ** (rho * h) - 1
+            h_term = h
+        else:
+            rho_term = rho + 1
+            h_term = 1
+
+        DE = gamma * h_term * rho_term * (m**2 - 1)/(4*m)
+        return DE
+
+    def SE(self, adapter: DynamicalSystemAdapter, delta: float, continuous: bool = False) -> float:
+        if continuous and "dt" not in adapter.bound_key().keys():
+            raise KeyError(f"Can't compute continuous DE for {adapter.__class__} without dt. Got bound key {adapter.bound_key()}.")
+
+        h = adapter.bound_key().get('dt', 1)
+        gamma = LipschitzConstantProvider.get_drift_bound(adapter)
+        m = 2 * self.r + 1 # window size
+
+        if continuous: 
+            h_term = h
+        else:
+            h_term = 1
+
+        SE = gamma * sqrt((2*log(2/delta)) / m) * h_term
+        return SE
+
+    def AE(self, adapter: DynamicalSystemAdapter, continuous: bool = False) -> float:
+        if not continuous: return 0
+
+        if continuous and "dt" not in adapter.bound_key().keys():
+            raise KeyError(f"Can't compute continuous DE for {adapter.__class__} without dt. Got bound key {adapter.bound_key()}.")
+
+        gamma = LipschitzConstantProvider.get_drift_bound(adapter)
+        rho = LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter, continuous)
+        h = adapter.bound_key().get('dt', 1)
+
+        return rho * h * gamma / 2
+
 
 class OptimalTemporalWeights(WeightingStrategy):
     """Centered uniform window with radius chosen from the discrete-time guide.
@@ -82,14 +124,26 @@ class OptimalTemporalWeights(WeightingStrategy):
     choosing the nearest integer to r = (m* - 1) / 2.
     """
 
-    def __init__(self, adapter: DynamicalSystemAdapter, delta: float):
+    def __init__(self, adapter: DynamicalSystemAdapter, delta: float, continuous: bool = False):
         """
         Args:
             adapter: Adapter supplying the transition-kernel Lipschitz constant.
             delta: Confidence level.
         """
-        rho = LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter)
-        optimal_window_length = ((2 * sqrt(2 * log(2/delta)))/(rho + 1)) ** (2/3)
+        if continuous and "dt" not in adapter.bound_key().keys():
+            raise KeyError(f"Can't compute continuous DE for {adapter.__class__} without dt. Got bound key {adapter.bound_key()}.")
+
+        rho = LipschitzConstantProvider.get_transition_wasserstein_lipschitz(adapter, continuous)
+        h = adapter.bound_key().get('dt', 1)
+
+        numerator = 2 * sqrt(2 * log(2/delta))
+
+        if continuous:
+            denominator = math.e ** (rho * h) - 1
+        else: 
+            denominator = rho + 1
+
+        optimal_window_length = (numerator / denominator) ** (2/3)
         optimal_radius = round((optimal_window_length-1)/2)
         self.weights = UniformWeights(radius=optimal_radius)
 
@@ -99,8 +153,11 @@ class OptimalTemporalWeights(WeightingStrategy):
     def __call__(self, drift_history: torch.Tensor, target: int) -> Optional[torch.Tensor]:
         return self.weights(drift_history, target)
 
-    def DE(self, adapter: DynamicalSystemAdapter) -> float:
-        return self.weights.DE(adapter)
+    def DE(self, adapter: DynamicalSystemAdapter, continuous: bool = False) -> float:
+        return self.weights.DE(adapter, continuous)
 
-    def SE(self, adapter: DynamicalSystemAdapter, delta: float) -> float:
-        return self.weights.SE(adapter, delta)
+    def SE(self, adapter: DynamicalSystemAdapter, delta: float, continuous: bool = False) -> float:
+        return self.weights.SE(adapter, delta, continuous)
+
+    def AE(self, adapter: DynamicalSystemAdapter, continuous: bool = False) -> float:
+        return self.weights.AE(adapter, continuous)

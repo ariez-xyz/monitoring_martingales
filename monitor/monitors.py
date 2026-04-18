@@ -25,11 +25,11 @@ class EstimationMonitor(Monitor):
     def __init__(self, estimator: Estimator):
         self.estimator = estimator
 
-    def __call__(self, adapter: DynamicalSystemAdapter) -> Generator[Tuple[Literal["T","F","?"], Dict[Any, Any]], None, None]:
+    def __call__(self, adapter: DynamicalSystemAdapter, continuous: bool = False) -> Generator[Tuple[Literal["T","F","?"], Dict[Any, Any]], None, None]:
         step_idx = 0
         try:
             while not adapter.done():
-                verdict, lower, upper, info = self.estimator(adapter)
+                verdict, lower, upper, info = self.estimator(adapter, continuous)
                 info = dict(info)
                 info["ci"] = (lower, upper)
                 yield verdict, info

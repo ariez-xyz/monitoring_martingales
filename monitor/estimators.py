@@ -10,7 +10,7 @@ import torch
 class Estimator(ABC):
     @abstractmethod
     def __call__(
-        self, adapter: DynamicalSystemAdapter
+        self, adapter: DynamicalSystemAdapter, continuous: bool = False
     ) -> Tuple[Literal["T","F","?"], float, float, Dict[str, Any]]:
         """
         Estimate E[R] for the adapter's current state and return a confidence interval.
@@ -63,7 +63,7 @@ class HistoryEstimator(Estimator):
         if not isinstance(weighting, UniformWeights) and not isinstance(weighting, OptimalTemporalWeights):
             raise ValueError("SE and DE are tuned for uniform weights (move their implementation to weighting classes for new types of weights)")
 
-    def __call__(self, adapter):
+    def __call__(self, adapter: DynamicalSystemAdapter, continuous: bool = False):
         drift_history = adapter.get_drift_history()
 
         current_drift_index = len(drift_history) - 1
@@ -84,11 +84,12 @@ class HistoryEstimator(Estimator):
         # \hat{d}_c^{(m)}
         weighted_mean = float(torch.dot(drift_history, maybeWeights))
 
-        SE = self.weighting.SE(adapter, self.delta)
-        DE = self.weighting.DE(adapter)
+        SE = self.weighting.SE(adapter, self.delta, continuous)
+        DE = self.weighting.DE(adapter, continuous)
+        AE = self.weighting.AE(adapter, continuous)
 
         # R_{DT}^{ctr}(m)
-        error = SE + DE
+        error = SE + DE + AE
 
         # Final CI
         lower = weighted_mean - error
@@ -118,7 +119,7 @@ class SamplingEstimator(Estimator):
         self.delta = delta
         self.hoeffding_cache = {}
 
-    def __call__(self, adapter, max_extra: int = 4096):
+    def __call__(self, adapter, continuous: bool = False, max_extra: int = 4096):
         sampled_states = adapter.sample(n_samples=512)
         drifts = adapter.get_drift(sampled_states)
 
@@ -164,7 +165,7 @@ class AnalyticEstimator(Estimator):
     Returns a degenerate CI (point estimate) since there's no sampling variance.
     """
 
-    def __call__(self, adapter):
+    def __call__(self, adapter: DynamicalSystemAdapter, continuous: bool = False):
         expected_next_state = adapter.sample(n_samples=1, noise_level=0.0).squeeze(0)
         # unsqueeze: get_drift expects batched input
         expected_next_state = expected_next_state.unsqueeze(0)
