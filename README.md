@@ -1,17 +1,22 @@
 # Monitoring neural control certificate functions
 
-This project implements runtime monitoring for neural control systems using certificate functions such as Lyapunov and barrier functions. The monitor detects whether the monitored certificate value is decreasing in expectation (i.e. whether it forms a supermartingale). It requires Lipschitz assumptions on the system dynamics and certificate functions, and provides statistical guarantees (confidence $\gt 1-\delta$). Several existing neural control systems (from MIT-REALM) are included as submodules and integrated via adapters providing a common interface for the monitor to run against.
+This project implements runtime monitors for neural control systems using certificate functions such as Lyapunov and barrier functions. 
 
 ## Installation
 
-The project uses a shared virtual environment for all submodules.
+The project uses a shared virtual environment for all submodules. 
+
+Run from the repository root: 
 
 ```bash
-# 1. Create and activate virtual environment
+# 1. Initialize Git submodules
+git submodule update --init --recursive
+
+# 2. Create venv
 uv venv --python 3.9
 source .venv/bin/activate  # adjust for shell
 
-# 2. Install dependencies
+# 3. Install dependencies
 uv pip install -r requirements.txt
 
 # ⚠️ IMPORTANT ⚠️
@@ -23,46 +28,45 @@ uv pip install -r requirements.txt
 # with --no-deps.
 uv pip install pytorch-lightning==1.3.8 --no-deps
 
-# 3. Verify installation
+# 4. Verify installation
 pytest
 ```
 
-
 ## Usage
-
-The monitor can be integrated into any control loop by writing an adapter (see `monitor/adapters/interface.py`). This repository currently includes adapters for `neural_clbf` and `sablas`.
-
-The monitor assigns the following verdicts:
-
-- `T`: Attests that the certificate is **valid** (decreasing). Used by estimator-based monitors when the upper confidence bound is below `0`.
-- `F`: Attests that the certificate is **invalid**, i.e. detected violation / rejected null hypothesis
-- `?`: Inconclusive.
-
 
 ### Estimator-based monitor
 
-This monitor is able to attest validity, but it additionally requires an estimator and a weighting strategy.
+The history estimator uses a centered temporal window and therefore reports with a delay equal to the weighting radius. It needs both a drift bound and a transition Wasserstein-Lipschitz bound (see [#Lipschitz constants](#Lipschitz constants)).
 
 ```python
+from monitor import EstimationMonitor
 from monitor.adapters import NeuralCLBFPendulum
 from monitor.estimators import HistoryEstimator
-from monitor.weighting import UniformWeights
-from monitor import EstimationMonitor
+from monitor.weighting import OptimalTemporalWeights
 
-# 1. Initialize the system and the monitor
 adapter = NeuralCLBFPendulum()
-weighting = UniformWeights(radius=10)  # window size = 2*radius+1
-estimator = HistoryEstimator(weighting, delta=0.01)
-monitor = EstimationMonitor(estimator)
+delta = 0.01
+weighting = OptimalTemporalWeights(adapter, delta)
+monitor = EstimationMonitor(HistoryEstimator(weighting, delta))
 
-# 2. Run the control/monitor loop
 for verdict, info in monitor(adapter):
+    print(verdict, info)
+```
+
+For the continuous-time error formulas, construct the weights with
+`continuous=True` and pass the same flag when running the estimation monitor:
+
+```python
+weighting = OptimalTemporalWeights(adapter, delta, continuous=True)
+monitor = EstimationMonitor(HistoryEstimator(weighting, delta))
+
+for verdict, info in monitor(adapter, continuous=True):
     print(verdict, info)
 ```
 
 ### Hypothesis-testing monitor
 
-This monitor implements a one-sided sequential test based on a betting e-process. It can reject the supermartingale hypothesis, but it does not certify it as true.
+This monitor implements a one-sided sequential test based on a betting e-process.
 
 ```python
 from monitor import HypothesisTestingMonitor
@@ -75,92 +79,243 @@ for verdict, info in monitor(adapter):
     print(verdict, info)
 ```
 
+## Lipschitz constants
 
-## Methodology
+The required Lipschitz constants are persisted in `calibration_constants.json`. Lookups are keyed by `adapter.bound_key()`. 
 
-The core quantity is the one-step drift
+Constants are not estimated automatically at monitor runtime. A configuration without a matching entry raises `KeyError`.
 
-$R_t = V(X_{t+1}) - V(X_t)$
+Use the calibration CLI to estimate Lipschitz constants empirically. Run data is stored under `data/calibration/`, and, unless `--dry-run` is used, the CLI also updates `calibration_constants.json`:
 
-and the monitoring objective is to determine whether
+```bash
+python -m monitor.cli.calibrate \
+  --adapter pendulum \
+  --estimate all \
+  --dt 0.01 \
+  --noise-level 0.0 \
+  --episodes 100 \
+  --max-steps 20 \
+  --samples-per-step 8 \
+  --percentile 100
+```
 
-$\mathbb{E}[R_t \mid X_t] \leq 0$
+## CI Sweep
 
-holds along the observed execution, i.e. $(R_i)_{i\in\mathbb{N}}$ is a supermartingale.
+To inspect the confidence-interval formulas over synthetic parameter grids:
 
-### Estimator-based monitors
+```bash
+python -m monitor.cli.ci_sweep \
+  --gamma 0.1,0.5,1.0 \
+  --rho 0.5,1.0,2.0 \
+  --h 0.01,0.1 \
+  --delta 0.01
+```
 
-Three estimator strategies are implemented in `monitor/estimators.py`:
+Results are written under `data/ci_sweeps/`.
 
-### 1. Analytic Estimator
-Computes $\mathbb{E}[R_t]$ directly using known system dynamics $P(x)$.
-*   **Pros**: Fast, exact (if dynamics known).
-*   **Cons**: Requires white-box access to dynamics; susceptible to Jensen gap if $V$ is highly nonlinear.
-*   **Assumption**: Small Jensen gap $|V(\mathbb{E}[Y]) - \mathbb{E}[V(Y)]| \approx 0$.
+## API Reference
 
-### 2. Sampling-Based Estimator
-Estimates $\mathbb{E}[R_t]$ by sampling $n$ next states from the simulator.
-*   **Pros**: Works with black-box simulators; provides rigorous concentration bounds (Hoeffding).
-*   **Cons**: Computationally expensive (requires multiple simulator steps per monitor tick).
+Monitor and estimator calls return verdicts as `"T"` (condition satisfied),
+`"F"` (condition violated), or `"?"` (inconclusive).
 
-### 3. History-Based Estimator
-Estimates $\mathbb{E}[R_t]$ using past observed transitions $x_1, \dots, x_t$ without resetting the simulator.
-*   **Pros**: No simulator resets required; pure runtime monitoring.
-*   **Cons**: Requires Lipschitz assumptions on system and value function.
-*   **Key Insight**: Uses a weighted average of past drifts, balancing **Discretization Error** (distance between current state and past states) and **Statistical Error** (variance of the estimator).
+```python
+from monitor import EstimationMonitor, HypothesisTestingMonitor
+from monitor.adapters import DynamicalSystemAdapter, NeuralCLBFPendulum, SablasDrone
+from monitor.calibration import CalibrationSample, LipschitzConstantProvider, LipschitzConstantSampler
+from monitor.estimators import AnalyticEstimator, HistoryEstimator, SamplingEstimator
+from monitor.weighting import OptimalTemporalWeights, UniformWeights
+```
 
-### Hypothesis-testing monitor
+### Monitors
 
-`HypothesisTestingMonitor` implements a sequential test for violations of the supermartingale condition. It maintains a predictable betting process and rejects when the e-process exceeds `1 / delta`.
+#### `EstimationMonitor`
 
-This path is useful when you want an online rejection test instead of a confidence interval for expected drift.
+```python
+EstimationMonitor(estimator: Estimator)
+monitor(adapter: DynamicalSystemAdapter, continuous: bool = False)
+monitor.viz(adapter: DynamicalSystemAdapter)
+```
 
-## Project Structure
+- `estimator`: Estimator used to produce a confidence interval at each step.
+- `adapter`: System to monitor. The monitor advances it after each verdict.
+- `continuous`: Use continuous-time confidence-interval terms. The estimator's
+  weighting strategy must have been configured for the same mode.
 
-*   `monitor/`: Core monitoring logic.
-    *   `monitors.py`: Estimator-based monitor and hypothesis-testing monitor.
-    *   `estimators.py`: Implementation of estimators (Analytic, Sampling, History).
-    *   `adapters/`: Interfaces for specific environments (Sablas, Neural-CLBF).
-    *   `weighting.py`: Weighting strategies for history-based estimation.
-*   `neural_clbf/`: Submodule for Neural CLBF controllers. In this repo it is primarily used for evaluation/runtime experiments.
-*   `sablas/`: Submodule for SABLAS environments.
-*   `scripts/`: Analysis and estimation scripts.
-*   `tests/`: Unit and integration tests.
+Calling the monitor yields `(verdict, info)` pairs. `info["ci"]` contains the
+`(lower, upper)` confidence interval.
+
+#### `HypothesisTestingMonitor`
+
+```python
+HypothesisTestingMonitor(delta: float)
+monitor(adapter: DynamicalSystemAdapter)
+monitor.viz(adapter: DynamicalSystemAdapter)
+```
+
+- `delta`: Test level. The monitor rejects when the e-value reaches `1 / delta`.
+- `adapter`: System to monitor. The monitor advances it before each verdict.
+
+Calling the monitor yields `(verdict, info)` pairs. The info dictionary includes
+`e_value`, `threshold`, `S_n`, `V_n`, and the current bet.
+
+### Estimators
+
+All estimators are called as:
+
+```python
+estimator(adapter: DynamicalSystemAdapter, continuous: bool = False)
+```
+
+They return `(verdict, lower, upper, info)`.
+
+#### `HistoryEstimator`
+
+```python
+HistoryEstimator(weighting: WeightingStrategy, delta: float)
+```
+
+- `weighting`: A `UniformWeights` or `OptimalTemporalWeights` instance.
+- `delta`: Confidence level used by the weighting strategy.
+
+Uses observed drift history. It returns inconclusive infinite bounds until the
+centered window is available. `info` includes the target index, delay, weighted
+mean, and error terms.
+
+#### `SamplingEstimator`
+
+```python
+SamplingEstimator(delta: float)
+estimator(adapter, continuous: bool = False, max_extra: int = 4096)
+```
+
+- `delta`: Confidence level for the sampling interval.
+- `max_extra`: Maximum number of additional samples after the initial batch of
+  512. Sampling stops early when the interval is conclusive.
+
+`info["n_samples"]` reports the number of sampled successor states.
+
+#### `AnalyticEstimator`
+
+```python
+AnalyticEstimator()
+```
+
+Uses `adapter.sample(n_samples=1, noise_level=0.0)` and returns a point
+interval. Use it only with adapters where zero noise represents the expected
+successor state.
+
+### Weighting Strategies
+
+#### `UniformWeights`
+
+```python
+UniformWeights(radius: int)
+weights(drift_history: torch.Tensor, target: int) -> Optional[torch.Tensor]
+weights.get_radius() -> int
+```
+
+- `radius`: Number of observations on either side of the target. The full
+  window size is `2 * radius + 1`.
+- `drift_history`: One-dimensional tensor of observed drifts.
+- `target`: Zero-based drift index at the center of the requested window.
+
+Returns a tensor aligned with `drift_history`, or `None` when the full centered
+window is unavailable.
+
+#### `OptimalTemporalWeights`
+
+```python
+OptimalTemporalWeights(
+    adapter: DynamicalSystemAdapter,
+    delta: float,
+    continuous: bool = False,
+)
+```
+
+- `adapter`: Supplies the persisted transition Wasserstein-Lipschitz bound and,
+  in continuous mode, `dt`.
+- `delta`: Confidence level used to choose the window radius.
+- `continuous`: Select continuous-time window and error formulas.
+
+This class exposes the same `__call__()` and `get_radius()` interface as
+`UniformWeights`.
+
+### Adapters
+
+#### `NeuralCLBFPendulum`
+
+```python
+NeuralCLBFPendulum(
+    checkpoint_path: str = "neural_clbf/saved_models/review/inverted_pendulum_clf.ckpt",
+    dt: Optional[float] = None,
+    noise_level: float = 0.0,
+    vis_every: int = 0,
+    vis_block: bool = False,
+    certificate_slope: float = 0.0,
+    flip_inputs_prob_to: float = 0.0,
+    flip_inputs_prob_from: float = 0.0,
+)
+```
+
+- `checkpoint_path`: Neural-CLBF checkpoint to load.
+- `dt`: Simulation timestep; `None` uses the checkpoint model's timestep.
+- `noise_level`: Magnitude of additive uniform control noise.
+- `vis_every`: Render every N steps; `0` disables rendering.
+- `vis_block`: Wait for input after each render.
+- `certificate_slope`: Per-step affine offset added to certificate values for
+  stress testing.
+- `flip_inputs_prob_to`: Per-step probability of entering the control-sign
+  fault mode.
+- `flip_inputs_prob_from`: Per-step probability of leaving that fault mode.
+
+`reset(seed: Optional[int] = None, initial_state: Optional[torch.Tensor] = None)`
+also accepts an explicit pendulum state.
+
+#### `SablasDrone`
+
+```python
+SablasDrone(
+    k_obstacle: int = 8,
+    use_estimated_param: bool = False,
+    dt: float = 0.1,
+    noise_level: float = 0.1,
+    vis_every: int = 0,
+    vis_block: bool = False,
+)
+```
+
+- `k_obstacle`: Number of obstacles represented in the environment.
+- `use_estimated_param`: Load the SABLAS estimated dynamics parameters.
+- `dt`: Simulation timestep.
+- `noise_level`: Environment process-noise scale.
+- `vis_every`: Render every N steps; `0` disables rendering.
+- `vis_block`: Wait for input after each render.
+
+The SABLAS adapter does not support per-call `noise_level` overrides in
+`sample()`.
+
 
 ## Current Caveats
 
-### `neural_clbf` integration
+### Neural-CLBF and `cvxpylayers`
 
-The `neural_clbf` submodule is currently used in an evaluation-first configuration.
+Currently, neural-clbf checkpoints are loaded without `cvxpylayers` through a compatibility shim in the submodule. This workaround is required because `cvxpylayers` fails to install on Apple Silicon. 
 
-- Older checkpoints can be loaded without `cvxpylayers` through a compatibility shim in the submodule.
-- This is sufficient for the monitoring and rollout code used here.
-- Training workflows that require differentiating through the CLF-QP layer are not the focus of this repository.
+The pendulum adapter uses the nominal controller (`u_nominal`, effectively the LQR path for this setup), with zero-order hold and optional injected control noise. Due to the `cvxpylayers` issue, it does not run the original CLF-QP correction layer at runtime, so certificate increases can occur and are part of the monitored behavior.
 
-### Pendulum adapter behavior
+### Empirical constants
 
-The pendulum adapter does not currently run the original CLF-QP correction layer at runtime. It uses the nominal controller (`u_nominal`, effectively the LQR path for this setup) plus optional injected control noise.
+The shipped pendulum drift and transition-kernel constants are persisted empirical calibration results, not formal global bounds.
 
-In plain terms:
+Changing fields such as `dt`, `noise_level`, or injected-fault probabilities generally requires a new matching calibration entry.
 
-- the controller can still stabilize the system,
-- but the control input is not explicitly projected each step to enforce CLF decrease,
-- so certificate increases can occur and should be treated as part of the monitored behavior rather than impossible by construction.
+The transition-bound sampler assumes that `noise_level=0` gives the expected next state and that transition laws are translated copies of a common zero-mean noise family. 
 
-### Lipschitz constants are implementation-level proxies
-
-Several monitor components rely on Lipschitz-style constants or one-step drift bounds. In the current codebase these should be read as practical estimates used for monitoring, not as formal analytic constants derived from the underlying system.
-
-- In the pendulum adapter, `get_drift_bound()` in [monitor/adapters/neural_clbf_pendulum.py](/Users/ariez/Projects/neural-control-monitoring/monitor/adapters/neural_clbf_pendulum.py) returns a per-step drift bound proxy.
-- For common `(dt, noise_level)` settings, the adapter uses seeded conservative values.
-- Otherwise it estimates the quantity empirically by rolling out trajectories, evaluating one-step certificate changes, and taking a high percentile of the observed absolute drifts.
-- This value is then cached and reused by the monitor.
-
-In plain terms, the monitor is currently using conservative data-driven bounds for the pendulum setup. That is good enough for experiments and smoke tests, but it is weaker than having a proof-level Lipschitz constant for the true closed-loop system.
+The SABLAS adapter does not currently satisfy the per-call noise override required by that sampler, and no SABLAS constants are shipped.
 
 ## Status
 
-*   **Adapters**: Implemented for Sablas and Neural-CLBF pendulum.
-*   **Estimator monitors**: Analytic, Sampling, and History monitors are implemented and exercised by tests and demos.
-*   **Hypothesis monitor**: Implemented and currently exercised through an integration-style smoke test on the pendulum adapter.
-*   **Documentation split**: This README is intended to describe the implemented system; exploratory derivations and research notes are kept separately.
+- Adapters: Neural-CLBF inverted pendulum and SABLAS drone.
+- Estimators: analytic, sampled, and centered-history implementations.
+- Monitors: confidence-interval estimation and sequential hypothesis testing.
+- Tooling: persisted empirical calibration and confidence-interval sweeps.
